@@ -6,18 +6,15 @@ import { getTriggerMessagePageData } from "../../../src/services/pageDataService
 
 type TriggerMessagePageProps = {
   params: Promise<{
-    token: string;
+    token: string[];
   }>;
 };
 
-export const dynamicParams = false;
-
-export async function generateStaticParams(): Promise<Array<{ token: string }>> {
-  return [];
-}
+export const dynamic = "force-dynamic";
 
 export default async function TriggerMessagePage({ params }: TriggerMessagePageProps) {
-  const { token } = await params;
+  const { token: tokenSegments } = await params;
+  const token = tokenSegments.join("/");
   const data = await getTriggerMessagePageData({
     token,
     now: new Date(),

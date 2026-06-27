@@ -9,18 +9,15 @@ import {
 
 type ContactConfirmationPageProps = {
   params: Promise<{
-    token: string;
+    token: string[];
   }>;
 };
 
-export const dynamicParams = false;
-
-export async function generateStaticParams(): Promise<Array<{ token: string }>> {
-  return [];
-}
+export const dynamic = "force-dynamic";
 
 export default async function ContactConfirmationPage({ params }: ContactConfirmationPageProps) {
-  const { token } = await params;
+  const { token: tokenSegments } = await params;
+  const token = tokenSegments.join("/");
   const data = await getContactConfirmationPageData({
     token,
     now: new Date(),
