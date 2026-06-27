@@ -10,6 +10,7 @@ Set these for the web deployment:
 APP_BASE_URL="https://your-domain.example"
 BIE_RANG_WO_XIAOSHI_TOKEN_SECRET="<long-random-secret>"
 CRON_SECRET="<long-random-cron-secret>"
+BIE_RANG_TRIGGER_CRON_SECRET="<optional-external-scheduler-secret>"
 TRIGGER_DELIVERY_CHANNEL="email"
 ```
 
@@ -55,6 +56,18 @@ Call the trigger endpoint with the cron secret:
 curl -X POST "https://your-domain.example/api/cron/trigger-expired" -H "x-cron-secret: <long-random-cron-secret>"
 ```
 
+For GitHub Actions or another external scheduler, set the same
+`BIE_RANG_TRIGGER_CRON_SECRET` value in both the scheduler and the Vercel project,
+then call:
+
+```powershell
+curl -X GET "https://your-domain.example/api/cron/trigger-expired" -H "Authorization: Bearer <external-scheduler-secret>"
+```
+
+Vercel Hobby projects cannot run every-minute Vercel Cron jobs. Use an external
+one-minute scheduler for strict minute-level checks, or the bundled GitHub
+Actions workflow as a free best-effort fallback.
+
 ## Database schema
 
-The current Prisma schema uses `DeliveryEvent.idempotencyKey` as the unique delivery guard. Before deploying a real database, apply the schema using the project's chosen flow, for example `prisma migrate deploy` for migrations or `prisma db push` for a prototype database.
+The current Prisma schema uses `DeliveryEvent.idempotencyKey` as the unique delivery guard. Before deploying a real database, apply the schema using the project's chosen flow, for example `prisma migrate deploy` for migrations.

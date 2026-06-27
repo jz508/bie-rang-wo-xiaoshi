@@ -30,6 +30,7 @@ class FakeContactRepository implements ContactRepository {
   async upsertPendingContactInviteAtomically(input: {
     userId: string;
     phone: string;
+    email?: string | null;
     displayName: string;
     now: Date;
     cooldownMs: number;
@@ -44,7 +45,7 @@ class FakeContactRepository implements ContactRepository {
       id: existing?.id ?? `contact-${this.nextContactNumber++}`,
       userId: input.userId,
       phone: input.phone,
-      email: existing?.email ?? null,
+      email: input.email ?? null,
       displayName: input.displayName,
       status: "pending",
       lastInviteAt: input.now,
@@ -216,6 +217,28 @@ describe("contact service", () => {
         },
       },
     ]);
+  });
+
+  it("stores a trimmed contact email for trigger email delivery", async () => {
+    const result = await inviteContact(
+      {
+        userId: "user-1",
+        phone: "13900139000",
+        email: "  chenmo@example.com  ",
+        displayName: "Auntie",
+        now,
+        tokenSecret,
+        confirmationBaseUrl: "https://example.test/c",
+      },
+      { repository, delivery },
+    );
+
+    expect(result.contact).toMatchObject({
+      phone: "13900139000",
+      email: "chenmo@example.com",
+      displayName: "Auntie",
+    });
+    expect(repository.contacts.get(result.contact.id)?.email).toBe("chenmo@example.com");
   });
 
   it("unverified sender cannot invite", async () => {

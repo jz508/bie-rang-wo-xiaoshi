@@ -32,6 +32,7 @@ export type ContactRepository = {
   upsertPendingContactInviteAtomically(input: {
     userId: string;
     phone: string;
+    email?: string | null;
     displayName: string;
     now: Date;
     cooldownMs: number;
@@ -65,6 +66,7 @@ export type ContactInviteDeliveryGateway = {
 export type InviteContactInput = {
   userId: string;
   phone: string;
+  email?: string | null;
   displayName: string;
   now: Date;
   tokenSecret: string;
@@ -113,6 +115,7 @@ export async function inviteContact(
   const contact = await repository.upsertPendingContactInviteAtomically({
     userId: input.userId,
     phone: input.phone,
+    email: normalizeOptionalEmail(input.email),
     displayName: input.displayName,
     now: input.now,
     cooldownMs: REINVITE_COOLDOWN_MS,
@@ -213,6 +216,11 @@ function getStatusForAction(action: ContactInviteAction): ContactRecord["status"
 
 function buildConfirmationUrl(baseUrl: string, token: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${token}`;
+}
+
+function normalizeOptionalEmail(email: string | null | undefined): string | null {
+  const trimmed = email?.trim();
+  return trimmed ? trimmed : null;
 }
 
 const unconfiguredRepository: ContactRepository = {

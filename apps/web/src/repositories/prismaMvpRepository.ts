@@ -65,6 +65,7 @@ export class PrismaMvpRepository
   async upsertPendingContactInviteAtomically(input: {
     userId: string;
     phone: string;
+    email?: string | null;
     displayName: string;
     now: Date;
     cooldownMs: number;
@@ -85,6 +86,7 @@ export class PrismaMvpRepository
             where: { id: existing.id },
             data: {
               displayName: input.displayName,
+              email: input.email ?? null,
               status: "pending",
               lastInviteAt: input.now,
             },
@@ -93,6 +95,7 @@ export class PrismaMvpRepository
             data: {
               userId: input.userId,
               phone: input.phone,
+              email: input.email ?? null,
               displayName: input.displayName,
               status: "pending",
               lastInviteAt: input.now,

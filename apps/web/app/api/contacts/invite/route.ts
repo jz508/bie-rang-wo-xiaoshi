@@ -6,6 +6,7 @@ import { inviteContact } from "../../../../src/services/contactService";
 
 type InviteContactRequestBody = {
   phone?: unknown;
+  email?: unknown;
   displayName?: unknown;
 };
 
@@ -34,6 +35,7 @@ export async function POST(request: Request): Promise<Response> {
       {
         userId: auth.userId,
         phone: body.phone,
+        email: typeof body.email === "string" ? body.email : null,
         displayName: body.displayName,
         now: new Date(),
         tokenSecret: config.tokenSecret,

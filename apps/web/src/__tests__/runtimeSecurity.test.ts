@@ -33,6 +33,7 @@ describe("runtime auth boundary", () => {
 describe("cron auth boundary", () => {
   afterEach(() => {
     delete process.env.CRON_SECRET;
+    delete process.env.BIE_RANG_TRIGGER_CRON_SECRET;
     vi.unstubAllEnvs();
   });
 
@@ -81,6 +82,20 @@ describe("cron auth boundary", () => {
       new Request("https://app.test/api/cron/trigger-expired", {
         headers: {
           authorization: "Bearer cron-secret",
+        },
+      }),
+    );
+
+    expect(response).toBeNull();
+  });
+
+  it("allows an external scheduler bearer secret", () => {
+    process.env.BIE_RANG_TRIGGER_CRON_SECRET = "external-cron-secret";
+
+    const response = authorizeCronRequest(
+      new Request("https://app.test/api/cron/trigger-expired", {
+        headers: {
+          authorization: "Bearer external-cron-secret",
         },
       }),
     );
