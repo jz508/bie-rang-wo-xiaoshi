@@ -1,0 +1,22 @@
+{
+  "name": "bie-rang-wo-xiaoshi-mvp",
+  "version": "0.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "validate:prisma": "node scripts/validate-prisma.cjs",
+    "release:android:pgyer": "node scripts/release-android-pgyer.mjs",
+    "test": "npm run test:domain && npm run test:mobile && npm run test:web",
+    "test:domain": "npm test --workspace @bie-rang-wo-xiaoshi/domain",
+    "test:mobile": "npm test --workspace @bie-rang-wo-xiaoshi/mobile",
+    "test:web": "npm test --workspace @bie-rang-wo-xiaoshi/web"
+  },
+  "devDependencies": {
+    "prisma": "6.19.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

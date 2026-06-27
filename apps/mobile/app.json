@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "别让我消失",
+    "slug": "bie-rang-wo-xiaoshi",
+    "version": "0.1.1",
+    "scheme": "bie-rang-wo-xiaoshi",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "extra": {
+      "apiBaseUrl": "http://localhost:3000",
+      "demoUserId": "demo-user"
+    },
+    "android": {
+      "package": "com.anonymous.bierangwoxiaoshi"
+    }
+  }
+}

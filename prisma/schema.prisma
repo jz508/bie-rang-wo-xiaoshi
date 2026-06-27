@@ -1,0 +1,107 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                     String             @id @default(cuid())
+  phone                  String             @unique
+  phoneVerifiedAt        DateTime?
+  nickname               String
+  smsTriggerPausedAt     DateTime?
+  smsTriggerPausedReason String?
+  createdAt              DateTime           @default(now())
+  countdown              Countdown?
+  contacts               EmergencyContact[]
+  presetMessages         PresetMessage[]
+  deliveryEvents         DeliveryEvent[]
+  abuseEvents            AbuseEvent[]
+}
+
+model Countdown {
+  id               String          @id @default(cuid())
+  userId           String          @unique
+  durationMinutes  Int
+  lastConfirmedAt  DateTime
+  expiresAt        DateTime
+  status           String
+  triggerClaimedAt DateTime?
+  user             User            @relation(fields: [userId], references: [id])
+  deliveryEvents   DeliveryEvent[]
+
+  @@index([status, expiresAt])
+  @@index([status, triggerClaimedAt])
+}
+
+model EmergencyContact {
+  id             String          @id @default(cuid())
+  userId         String
+  phone          String
+  email          String?
+  displayName    String
+  status         String
+  lastInviteAt   DateTime?
+  blockedAt      DateTime?
+  createdAt      DateTime        @default(now())
+  user           User            @relation(fields: [userId], references: [id])
+  deliveryEvents DeliveryEvent[]
+  abuseEvents    AbuseEvent[]
+
+  @@unique([userId, phone])
+  @@index([userId, status])
+}
+
+model PresetMessage {
+  id           String   @id @default(cuid())
+  userId       String
+  templateKey  String
+  shortNote    String
+  reviewStatus String
+  reviewReason String?
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, updatedAt])
+}
+
+model DeliveryEvent {
+  id             String           @id @default(cuid())
+  userId         String
+  countdownId    String
+  contactId      String
+  channel        String
+  status         String
+  reason         String?
+  triggerKey     String
+  idempotencyKey String           @unique
+  templateKey    String
+  templateText   String
+  shortNote      String?
+  createdAt      DateTime         @default(now())
+  user           User             @relation(fields: [userId], references: [id])
+  contact        EmergencyContact @relation(fields: [contactId], references: [id])
+  countdown      Countdown        @relation(fields: [countdownId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([countdownId, createdAt])
+  @@index([contactId, createdAt])
+}
+
+model AbuseEvent {
+  id        String           @id @default(cuid())
+  userId    String
+  contactId String
+  type      String
+  reason    String?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id])
+  contact   EmergencyContact @relation(fields: [contactId], references: [id])
+
+  @@unique([userId, contactId, type])
+  @@index([userId, type, createdAt])
+  @@index([contactId, createdAt])
+}
