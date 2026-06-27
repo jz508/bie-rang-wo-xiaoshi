@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "npm run build --workspace @bie-rang-wo-xiaoshi/domain && npm run prisma:generate && next build",
+    "build": "npm run build --workspace @bie-rang-wo-xiaoshi/domain && npm run prisma:migrate:deploy && npm run prisma:generate && next build",
+    "prisma:migrate:deploy": "node ../../scripts/deploy-prisma-if-configured.mjs ../../prisma/schema.prisma",
     "prisma:generate": "prisma generate --schema ../../prisma/schema.prisma",
     "test": "vitest run",
     "typecheck": "npm run build --workspace @bie-rang-wo-xiaoshi/domain && npm run prisma:generate && tsc --noEmit -p tsconfig.json"
