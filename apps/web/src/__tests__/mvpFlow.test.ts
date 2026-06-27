@@ -54,6 +54,7 @@ class MvpRepository
   async upsertPendingContactInviteAtomically(input: {
     userId: string;
     phone: string;
+    email?: string | null;
     displayName: string;
     now: Date;
     cooldownMs: number;
@@ -68,7 +69,7 @@ class MvpRepository
       id: existing?.id ?? `contact-${this.nextContactNumber++}`,
       userId: input.userId,
       phone: input.phone,
-      email: existing?.email ?? null,
+      email: input.email ?? existing?.email ?? null,
       displayName: input.displayName,
       status: "pending",
       lastInviteAt: input.now,
@@ -138,6 +139,17 @@ class MvpRepository
     }
 
     const updated = { ...countdown, ...input, triggerClaimedAt: null };
+    this.countdowns.set(input.userId, updated);
+    return updated;
+  }
+
+  async pauseCountdown(input: { userId: string; pausedAt: Date }): Promise<CountdownRecord> {
+    const countdown = this.countdowns.get(input.userId);
+    if (!countdown) {
+      throw new Error("Countdown not found for user");
+    }
+
+    const updated = { ...countdown, status: "paused" as const, triggerClaimedAt: null };
     this.countdowns.set(input.userId, updated);
     return updated;
   }
@@ -336,7 +348,12 @@ class MvpRepository
 }
 
 class InviteDelivery implements ContactInviteDeliveryGateway {
+  emailPayloads: Parameters<ContactInviteDeliveryGateway["sendInviteEmail"]>[0][] = [];
   payloads: ContactInviteDeliveryPayload[] = [];
+
+  async sendInviteEmail(payload: Parameters<ContactInviteDeliveryGateway["sendInviteEmail"]>[0]): Promise<void> {
+    this.emailPayloads.push(payload);
+  }
 
   async sendInviteSms(payload: ContactInviteDeliveryPayload): Promise<void> {
     this.payloads.push(payload);

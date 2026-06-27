@@ -265,6 +265,21 @@ export class PrismaMvpRepository
     return toCountdownRecord(countdown);
   }
 
+  async pauseCountdown(input: {
+    userId: string;
+    pausedAt: Date;
+  }): Promise<CountdownRecord> {
+    const countdown = await this.prisma.countdown.update({
+      where: { userId: input.userId },
+      data: {
+        status: "paused",
+        triggerClaimedAt: null,
+      },
+    });
+
+    return toCountdownRecord(countdown);
+  }
+
   async claimExpiredCountdowns(input: {
     now: Date;
     staleClaimedBefore: Date;

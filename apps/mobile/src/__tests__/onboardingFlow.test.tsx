@@ -79,7 +79,7 @@ describe("mobile app shell flow", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://localhost:3000/api/messages/review",
+        "https://bie-rang-wo-xiaoshi-web.vercel.app/api/messages/review",
         expect.objectContaining({
           body: JSON.stringify({
             templateKey: "find_me",

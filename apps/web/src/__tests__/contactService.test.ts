@@ -4,6 +4,7 @@ import {
   inviteContact,
   respondToContactInvite,
   type ContactInviteDeliveryGateway,
+  type ContactInviteEmailPayload,
   type ContactInviteDeliveryPayload,
   type ContactRepository,
   type ContactRecord,
@@ -107,8 +108,16 @@ class FakeContactRepository implements ContactRepository {
 }
 
 class FakeContactInviteDelivery implements ContactInviteDeliveryGateway {
+  emailPayloads: ContactInviteEmailPayload[] = [];
   payloads: ContactInviteDeliveryPayload[] = [];
   error: Error | null = null;
+
+  async sendInviteEmail(payload: ContactInviteEmailPayload): Promise<void> {
+    if (this.error) {
+      throw this.error;
+    }
+    this.emailPayloads.push(payload);
+  }
 
   async sendInviteSms(payload: ContactInviteDeliveryPayload): Promise<void> {
     if (this.error) {
@@ -239,6 +248,36 @@ describe("contact service", () => {
       displayName: "Auntie",
     });
     expect(repository.contacts.get(result.contact.id)?.email).toBe("chenmo@example.com");
+  });
+
+  it("sends the contact confirmation invite by email when an email is available", async () => {
+    const result = await inviteContact(
+      {
+        userId: "user-1",
+        phone: "13900139000",
+        email: "  chenmo@example.com  ",
+        displayName: "Auntie",
+        now,
+        tokenSecret,
+        confirmationBaseUrl: "https://example.test/c",
+      },
+      { repository, delivery },
+    );
+
+    expect(delivery.payloads).toEqual([]);
+    expect(delivery.emailPayloads).toEqual([
+      {
+        toEmail: "chenmo@example.com",
+        subject: "别让我消失联系人确认",
+        text: [
+          "Auntie，Sender把你设置为紧急联系人。",
+          "请打开下面的链接确认是否接受：",
+          `https://example.test/c/${result.token}`,
+          "如果你不认识对方，可以在页面中拒绝或举报。",
+        ].join("\n"),
+        idempotencyKey: `contact-invite:${result.contact.id}:${now.toISOString()}`,
+      },
+    ]);
   });
 
   it("unverified sender cannot invite", async () => {

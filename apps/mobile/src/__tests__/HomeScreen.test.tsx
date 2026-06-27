@@ -77,6 +77,7 @@ describe("HomeScreen", () => {
     });
     await fireEvent.changeText(screen.getByLabelText("联系人1姓名"), "周宁");
     await fireEvent.changeText(screen.getByLabelText("联系人1电话"), "13700137000");
+    await fireEvent.changeText(screen.getByLabelText("联系人1邮箱"), "zhouning@example.com");
     await fireEvent.press(screen.getByLabelText("关闭联系人编辑"));
     await fireEvent.changeText(screen.getByLabelText("短备注"), "备用钥匙在物业");
     await fireEvent.press(screen.getByText("保存并返回"));
@@ -107,6 +108,13 @@ describe("HomeScreen", () => {
         method: "POST",
       }),
     );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://app.test/api/contacts/invite",
+      expect.objectContaining({
+        body: expect.stringContaining('"email":"zhouning@example.com"'),
+        method: "POST",
+      }),
+    );
   });
 
   it("requires the safety code before confirming and then shows the recessed green safe state", async () => {
@@ -118,6 +126,17 @@ describe("HomeScreen", () => {
     expect(screen.getByText("守护中")).toBeTruthy();
     expect(screen.getByText("如果我没有回来确认")).toBeTruthy();
     expect(screen.getByText("02:15:00")).toBeTruthy();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://app.test/api/countdown/confirm",
+        expect.objectContaining({
+          body: JSON.stringify({
+            durationMinutes: 135,
+          }),
+          method: "POST",
+        }),
+      );
+    });
 
     await fireEvent.press(screen.getByText("我还在"));
     expect(screen.getByText("确认安全")).toBeTruthy();
@@ -133,11 +152,9 @@ describe("HomeScreen", () => {
       expect(screen.getByText(/已确认安全，\d+s 后回到首页/)).toBeTruthy();
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://app.test/api/countdown/confirm",
+      "https://app.test/api/countdown/pause",
       expect.objectContaining({
-        body: JSON.stringify({
-          durationMinutes: 135,
-        }),
+        body: JSON.stringify({}),
         method: "POST",
       }),
     );

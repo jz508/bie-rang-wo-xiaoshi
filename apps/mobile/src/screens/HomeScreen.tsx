@@ -43,6 +43,7 @@ type HomeScreenProps = {
 };
 
 const confirmCode = "1234";
+const defaultApiBaseUrl = "https://bie-rang-wo-xiaoshi-web.vercel.app";
 const safetyReturnSeconds = 5;
 const wheelItemHeight = 42;
 
@@ -92,7 +93,7 @@ const templates: TemplateOption[] = [
 ];
 
 export function HomeScreen({
-  apiBaseUrl = "http://localhost:3000",
+  apiBaseUrl = defaultApiBaseUrl,
   nightModePreference: controlledNightModePreference,
   onNightModePreferenceChange,
   onThemeNameChange,
@@ -212,7 +213,7 @@ export function HomeScreen({
     }
   }
 
-  function handleStartPlan() {
+  async function handleStartPlan() {
     if (!canStart) {
       return;
     }
@@ -223,6 +224,12 @@ export function HomeScreen({
     setConfirmCodeError("");
     setSafetyConfirmed(false);
     setPlanStarted(true);
+
+    try {
+      await postJson(apiBaseUrl, "/api/countdown/confirm", { durationMinutes }, userId);
+    } catch {
+      // The local guard view remains responsive even when the demo backend is unavailable.
+    }
   }
 
   function toggleContact(contactId: string) {
@@ -286,6 +293,7 @@ export function HomeScreen({
         reachableContacts.map((contact) =>
           postJson(apiBaseUrl, "/api/contacts/invite", {
             phone: contact.phone.trim(),
+            email: contact.email.trim(),
             displayName: contact.name.trim(),
           }, userId),
         ),
@@ -316,7 +324,7 @@ export function HomeScreen({
     setSafetyConfirmed(true);
 
     try {
-      await postJson(apiBaseUrl, "/api/countdown/confirm", { durationMinutes }, userId);
+      await postJson(apiBaseUrl, "/api/countdown/pause", {}, userId);
     } catch {
       // The local safety confirmation is intentionally not blocked by network state.
     }

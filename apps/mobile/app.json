@@ -8,7 +8,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "extra": {
-      "apiBaseUrl": "http://localhost:3000",
+      "apiBaseUrl": "https://bie-rang-wo-xiaoshi-web.vercel.app",
       "demoUserId": "demo-user"
     },
     "android": {

@@ -86,6 +86,10 @@ export type CountdownRepository = {
     expiresAt: Date;
     status: CountdownStatus;
   }): Promise<CountdownRecord>;
+  pauseCountdown(input: {
+    userId: string;
+    pausedAt: Date;
+  }): Promise<CountdownRecord>;
   claimExpiredCountdowns(input: {
     now: Date;
     staleClaimedBefore: Date;
@@ -118,6 +122,7 @@ export type TriggerExpiredCountdownsOptions = {
 const ACTIVE_STATUS = "active";
 const TRIGGERING_STATUS = "triggering";
 const EXPIRED_STATUS = "expired";
+const PAUSED_STATUS = "paused";
 const CONFIRMED_CONTACT_STATUS = "confirmed";
 const FAILED_DELIVERY_STATUS = "failed";
 const DEFAULT_MESSAGE_BASE_URL = "http://localhost:3000/m";
@@ -150,6 +155,17 @@ export async function confirmCountdown(
     lastConfirmedAt: now,
     expiresAt: getExpiresAt(now, nextDurationMinutes),
     status: ACTIVE_STATUS,
+  });
+}
+
+export async function pauseCountdown(
+  userId: string,
+  now: Date,
+  repository: CountdownRepository = unconfiguredRepository,
+): Promise<CountdownRecord> {
+  return repository.pauseCountdown({
+    userId,
+    pausedAt: now,
   });
 }
 
@@ -303,6 +319,9 @@ const unconfiguredRepository: CountdownRepository = {
   async updateCountdownConfirmation(): Promise<CountdownRecord> {
     throw new Error("Countdown repository is not configured");
   },
+  async pauseCountdown(): Promise<CountdownRecord> {
+    throw new Error("Countdown repository is not configured");
+  },
   async claimExpiredCountdowns(): Promise<CountdownRecord[]> {
     throw new Error("Countdown repository is not configured");
   },
@@ -333,4 +352,5 @@ export const countdownStatuses = {
   active: ACTIVE_STATUS,
   triggering: TRIGGERING_STATUS,
   expired: EXPIRED_STATUS,
+  paused: PAUSED_STATUS,
 } as const;

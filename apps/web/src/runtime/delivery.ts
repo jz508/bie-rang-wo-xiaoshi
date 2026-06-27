@@ -18,8 +18,13 @@ import {
 
 export function createContactInviteDelivery(
   provider: SmsProvider = createRuntimeSmsProvider(),
+  emailProvider: EmailProvider = createRuntimeEmailProvider(),
 ): ContactInviteDeliveryGateway {
   return {
+    async sendInviteEmail(payload): Promise<void> {
+      await emailProvider.sendEmail(payload);
+    },
+
     async sendInviteSms(payload): Promise<void> {
       await provider.sendTemplateSms(payload);
     },

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   confirmCountdown,
+  pauseCountdown,
   type CountdownRecord,
   type CountdownRepository,
   type DeliveryEventInput,
@@ -136,6 +137,17 @@ class FakeCountdownRepository implements CountdownRepository {
       this.countdowns.set(countdown.userId, { ...countdown, status: "expired", triggerClaimedAt: null });
     }
   }
+
+  async pauseCountdown(input: { userId: string; pausedAt: Date }): Promise<CountdownRecord> {
+    const countdown = this.countdowns.get(input.userId);
+    if (!countdown) {
+      throw new Error("Countdown not found for user");
+    }
+
+    const updated = { ...countdown, status: "paused" as const, triggerClaimedAt: null };
+    this.countdowns.set(input.userId, updated);
+    return updated;
+  }
 }
 
 class FakeDeliverySender implements DeliverySender {
@@ -184,6 +196,30 @@ describe("countdown service", () => {
       status: "active",
       lastConfirmedAt: new Date("2026-06-24T08:15:00.000Z"),
       expiresAt: new Date("2026-06-24T09:45:00.000Z"),
+    });
+  });
+
+  it("pause stops the active countdown after the user confirms safety", async () => {
+    repository.countdowns.set("user-1", {
+      id: "countdown-1",
+      userId: "user-1",
+      durationMinutes: 135,
+      lastConfirmedAt: new Date("2026-06-24T08:00:00.000Z"),
+      expiresAt: new Date("2026-06-24T10:15:00.000Z"),
+      status: "active",
+      triggerClaimedAt: new Date("2026-06-24T10:16:00.000Z"),
+    });
+
+    const updated = await pauseCountdown(
+      "user-1",
+      new Date("2026-06-24T09:00:00.000Z"),
+      repository,
+    );
+
+    expect(updated).toMatchObject({
+      id: "countdown-1",
+      status: "paused",
+      triggerClaimedAt: null,
     });
   });
 

@@ -59,7 +59,15 @@ export type ContactRepository = {
 
 export type ContactInviteDeliveryPayload = ContactInviteSmsPayload;
 
+export type ContactInviteEmailPayload = {
+  toEmail: string;
+  subject: string;
+  text: string;
+  idempotencyKey: string;
+};
+
 export type ContactInviteDeliveryGateway = {
+  sendInviteEmail(payload: ContactInviteEmailPayload): Promise<void>;
   sendInviteSms(payload: ContactInviteDeliveryPayload): Promise<void>;
 };
 
@@ -112,10 +120,11 @@ export async function inviteContact(
     throw new Error("Sender phone is not verified");
   }
 
+  const email = normalizeOptionalEmail(input.email);
   const contact = await repository.upsertPendingContactInviteAtomically({
     userId: input.userId,
     phone: input.phone,
-    email: normalizeOptionalEmail(input.email),
+    email,
     displayName: input.displayName,
     now: input.now,
     cooldownMs: REINVITE_COOLDOWN_MS,
@@ -129,13 +138,27 @@ export async function inviteContact(
   });
 
   try {
-    await delivery.sendInviteSms(
-      buildContactInviteSmsPayload({
-        toPhone: input.phone,
-        inviterNickname: sender.nickname,
-        confirmationUrl: buildConfirmationUrl(input.confirmationBaseUrl, token),
-      }),
-    );
+    const confirmationUrl = buildConfirmationUrl(input.confirmationBaseUrl, token);
+    if (email) {
+      await delivery.sendInviteEmail(
+        buildContactInviteEmailPayload({
+          confirmationUrl,
+          contactDisplayName: input.displayName,
+          contactId: contact.id,
+          createdAt: input.now,
+          inviterNickname: sender.nickname,
+          toEmail: email,
+        }),
+      );
+    } else {
+      await delivery.sendInviteSms(
+        buildContactInviteSmsPayload({
+          toPhone: input.phone,
+          inviterNickname: sender.nickname,
+          confirmationUrl,
+        }),
+      );
+    }
   } catch (error) {
     await repository.deleteUnsentPendingContactInvite({
       userId: input.userId,
@@ -218,6 +241,27 @@ function buildConfirmationUrl(baseUrl: string, token: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${token}`;
 }
 
+function buildContactInviteEmailPayload(input: {
+  confirmationUrl: string;
+  contactDisplayName: string;
+  contactId: string;
+  createdAt: Date;
+  inviterNickname: string;
+  toEmail: string;
+}): ContactInviteEmailPayload {
+  return {
+    toEmail: input.toEmail,
+    subject: "别让我消失联系人确认",
+    text: [
+      `${input.contactDisplayName}，${input.inviterNickname}把你设置为紧急联系人。`,
+      "请打开下面的链接确认是否接受：",
+      input.confirmationUrl,
+      "如果你不认识对方，可以在页面中拒绝或举报。",
+    ].join("\n"),
+    idempotencyKey: `contact-invite:${input.contactId}:${input.createdAt.toISOString()}`,
+  };
+}
+
 function normalizeOptionalEmail(email: string | null | undefined): string | null {
   const trimmed = email?.trim();
   return trimmed ? trimmed : null;
@@ -239,6 +283,9 @@ const unconfiguredRepository: ContactRepository = {
 };
 
 const unconfiguredDelivery: ContactInviteDeliveryGateway = {
+  async sendInviteEmail(): Promise<void> {
+    throw new Error("Contact invite delivery is not configured");
+  },
   async sendInviteSms(): Promise<void> {
     throw new Error("Contact invite delivery is not configured");
   },
