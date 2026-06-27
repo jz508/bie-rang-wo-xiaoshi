@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getAuthenticatedUser, requireAuthenticatedUser } from "../runtime/auth";
 import { authorizeCronRequest } from "../runtime/cronAuth";
 import { getRuntimeConfig } from "../runtime/config";
+import { GET, POST } from "../../app/api/cron/trigger-expired/route";
 
 describe("runtime auth boundary", () => {
   it("requires an authenticated user header for write routes", async () => {
@@ -71,6 +72,24 @@ describe("cron auth boundary", () => {
     );
 
     expect(response).toBeNull();
+  });
+
+  it("allows Vercel cron bearer authorization", () => {
+    process.env.CRON_SECRET = "cron-secret";
+
+    const response = authorizeCronRequest(
+      new Request("https://app.test/api/cron/trigger-expired", {
+        headers: {
+          authorization: "Bearer cron-secret",
+        },
+      }),
+    );
+
+    expect(response).toBeNull();
+  });
+
+  it("supports GET for cron providers while keeping POST for manual triggers", () => {
+    expect(GET).toBe(POST);
   });
 });
 

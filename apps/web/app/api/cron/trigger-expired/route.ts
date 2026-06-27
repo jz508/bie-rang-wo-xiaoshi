@@ -29,6 +29,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
+export const GET = POST;
+
 function isRuntimeConfigurationError(error: Error): boolean {
   return (
     error.message === "APP_BASE_URL is not configured" ||
