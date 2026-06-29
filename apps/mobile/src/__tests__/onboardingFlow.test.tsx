@@ -39,12 +39,58 @@ async function openSettings(view: RenderResult) {
   });
 }
 
+async function addConfirmedContact(view: RenderResult) {
+  await fireEvent.press(view.getByLabelText("添加联系人"));
+  await waitFor(() => {
+    expect(view.getByText("添加联系人")).toBeTruthy();
+  });
+  await fireEvent.changeText(view.getByLabelText("联系人姓名"), "周宁");
+  await fireEvent.changeText(view.getByLabelText("联系人电话"), "13700137000");
+  await fireEvent.changeText(view.getByLabelText("联系人邮箱"), "zhouning@example.com");
+  await fireEvent.press(view.getByText("发送邀请"));
+  await waitFor(() => {
+    expect(view.getByText("联系人已确认")).toBeTruthy();
+  });
+  await fireEvent.press(view.getByText("返回设置"));
+  await waitFor(() => {
+    expect(view.getAllByText("周宁").length).toBeGreaterThan(0);
+  });
+}
+
 describe("mobile app shell flow", () => {
   const fetchMock = jest.fn();
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    fetchMock.mockResolvedValue({ ok: true, status: 200 });
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === "https://brwxs.com/api/contacts" && options?.method === "GET") {
+        return {
+          json: async () => ({ contacts: [] }),
+          ok: true,
+          status: 200,
+        };
+      }
+      if (url === "https://brwxs.com/api/contacts/invite") {
+        return {
+          json: async () => ({
+            contact: {
+              displayName: "周宁",
+              email: "zhouning@example.com",
+              id: "contact-1",
+              phone: "13700137000",
+              status: "confirmed",
+            },
+          }),
+          ok: true,
+          status: 200,
+        };
+      }
+      return {
+        json: async () => ({}),
+        ok: true,
+        status: 200,
+      };
+    });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     await AsyncStorage.clear();
   });
@@ -60,6 +106,11 @@ describe("mobile app shell flow", () => {
     expect(view.getByText("2 小时 15 分钟")).toBeTruthy();
     expect(view.getByText("联系人")).toBeTruthy();
     expect(view.getByText("预案")).toBeTruthy();
+    expect(view.getByText("添加并确认联系人后可开始")).toBeTruthy();
+
+    await openSettings(view);
+    await addConfirmedContact(view);
+    await fireEvent.press(view.getByText("保存并返回"));
 
     await fireEvent.press(view.getByText("开始守护"));
 
@@ -74,12 +125,13 @@ describe("mobile app shell flow", () => {
     await login(view);
 
     await openSettings(view);
+    await addConfirmedContact(view);
     await fireEvent.changeText(view.getByLabelText("短备注"), "备用钥匙在物业");
     await fireEvent.press(view.getByText("保存并返回"));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://bie-rang-wo-xiaoshi-web.vercel.app/api/messages/review",
+        "https://brwxs.com/api/messages/review",
         expect.objectContaining({
           body: JSON.stringify({
             templateKey: "find_me",

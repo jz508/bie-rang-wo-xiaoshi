@@ -26,6 +26,15 @@ type ContactOption = {
   id: string;
   name: string;
   phone: string;
+  status: ContactStatus;
+};
+
+type RemoteContact = {
+  displayName?: unknown;
+  email?: unknown;
+  id?: unknown;
+  phone?: unknown;
+  status?: unknown;
 };
 
 type TemplateOption = {
@@ -33,8 +42,11 @@ type TemplateOption = {
   text: string;
 };
 
+type ContactStatus = "blocked" | "confirmed" | "declined" | "pending" | "reported";
+
 type HomeScreenProps = {
   apiBaseUrl?: string;
+  initialRemainingSeconds?: number;
   nightModePreference?: NightModePreference;
   themeName?: ThemeName;
   userId?: string;
@@ -43,7 +55,7 @@ type HomeScreenProps = {
 };
 
 const confirmCode = "1234";
-const defaultApiBaseUrl = "https://bie-rang-wo-xiaoshi-web.vercel.app";
+const defaultApiBaseUrl = "https://brwxs.com";
 const safetyReturnSeconds = 5;
 const wheelItemHeight = 42;
 
@@ -53,29 +65,8 @@ const nightModeOptions: Array<{ label: string; value: NightModePreference }> = [
   { label: "开启", value: "on" },
 ];
 
-const initialContacts: ContactOption[] = [
-  {
-    email: "chenmo@example.com",
-    enabled: true,
-    id: "chen-mo",
-    name: "陈默",
-    phone: "139 0013 9000",
-  },
-  {
-    email: "zhangsan@example.com",
-    enabled: true,
-    id: "zhang-san",
-    name: "张三",
-    phone: "138 0013 9000",
-  },
-  {
-    email: "lisi@example.com",
-    enabled: false,
-    id: "li-si",
-    name: "李四",
-    phone: "137 0013 9000",
-  },
-];
+const initialContacts: ContactOption[] = [];
+const emptyContactDraft = { email: "", name: "", phone: "" };
 
 const templates: TemplateOption[] = [
   {
@@ -94,6 +85,7 @@ const templates: TemplateOption[] = [
 
 export function HomeScreen({
   apiBaseUrl = defaultApiBaseUrl,
+  initialRemainingSeconds,
   nightModePreference: controlledNightModePreference,
   onNightModePreferenceChange,
   onThemeNameChange,
@@ -107,10 +99,14 @@ export function HomeScreen({
   const [hours, setHours] = useState(2);
   const [minutes, setMinutes] = useState(15);
   const [planStarted, setPlanStarted] = useState(false);
-  const [remainingSeconds, setRemainingSeconds] = useState(135 * 60);
+  const [planExpired, setPlanExpired] = useState(false);
+  const [remainingSeconds, setRemainingSeconds] = useState(initialRemainingSeconds ?? 135 * 60);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [contactEditorOpen, setContactEditorOpen] = useState(false);
   const [contacts, setContacts] = useState(initialContacts);
+  const [contactDraft, setContactDraft] = useState(emptyContactDraft);
+  const [contactError, setContactError] = useState("");
+  const [waitingContactId, setWaitingContactId] = useState<string | null>(null);
   const [selectedTemplateKey, setSelectedTemplateKey] = useState(templates[0].key);
   const [note, setNote] = useState("");
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -125,25 +121,34 @@ export function HomeScreen({
   const [automaticNightModeActive, setAutomaticNightModeActive] = useState(() => isAutomaticNightModeActive());
   const homeEntrance = useRef(new Animated.Value(0)).current;
   const nightModePreference = controlledNightModePreference ?? localNightModePreference;
+  const activeUserId = userId === "demo-user" ? phoneInput.trim() || userId : userId;
 
   const nightMode =
     nightModePreference === "on" ||
     (nightModePreference === "auto" && automaticNightModeActive) ||
     themeName === "night";
   const palette = nightMode ? palettes.night : palettes.light;
-  const enabledContacts = contacts.filter((contact) => contact.enabled);
+  const enabledContacts = contacts.filter((contact) => contact.status === "confirmed" && contact.enabled);
   const reachableContacts = enabledContacts.filter(
     (contact) => contact.name.trim() && (contact.phone.trim() || contact.email.trim()),
   );
+  const waitingContact = waitingContactId ? contacts.find((contact) => contact.id === waitingContactId) ?? null : null;
   const selectedTemplate = templates.find((template) => template.key === selectedTemplateKey) ?? templates[0];
   const durationMinutes = hours * 60 + minutes;
   const canLogin = phoneInput.trim().length >= 5;
   const canStart = durationMinutes > 0 && reachableContacts.length > 0;
+  const canAddContact =
+    contacts.length < 3 &&
+    contactDraft.name.trim().length > 0 &&
+    contactDraft.phone.trim().length > 0;
   const previewMessage = [selectedTemplate.text, note.trim()].filter(Boolean).join(" ");
-  const contactDisplay = enabledContacts.map((contact) => contact.name.trim() || "未命名").join("、") || "未开启";
+  const contactDisplay =
+    contacts.length === 0
+      ? "未添加"
+      : enabledContacts.map((contact) => contact.name.trim() || "未命名").join("、") || "未开启";
 
   useEffect(() => {
-    if (!planStarted || safetyConfirmed) {
+    if (!planStarted || safetyConfirmed || planExpired) {
       return;
     }
 
@@ -152,7 +157,21 @@ export function HomeScreen({
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [planStarted, safetyConfirmed]);
+  }, [planExpired, planStarted, safetyConfirmed]);
+
+  useEffect(() => {
+    if (planStarted && !safetyConfirmed && remainingSeconds === 0) {
+      setPlanExpired(true);
+    }
+  }, [planStarted, remainingSeconds, safetyConfirmed]);
+
+  useEffect(() => {
+    if (!loggedIn) {
+      return;
+    }
+
+    void refreshContacts();
+  }, [activeUserId, loggedIn]);
 
   useEffect(() => {
     if (nightModePreference !== "auto") {
@@ -181,6 +200,7 @@ export function HomeScreen({
     const timeoutId = setTimeout(() => {
       clearInterval(intervalId);
       setPlanStarted(false);
+      setPlanExpired(false);
       setSafetyConfirmed(false);
       setConfirmCodeInput("");
       setConfirmCodeError("");
@@ -218,7 +238,8 @@ export function HomeScreen({
       return;
     }
 
-    setRemainingSeconds(durationMinutes * 60);
+    setRemainingSeconds(initialRemainingSeconds ?? durationMinutes * 60);
+    setPlanExpired(false);
     setConfirmDialogOpen(false);
     setConfirmCodeInput("");
     setConfirmCodeError("");
@@ -226,7 +247,7 @@ export function HomeScreen({
     setPlanStarted(true);
 
     try {
-      await postJson(apiBaseUrl, "/api/countdown/confirm", { durationMinutes }, userId);
+      await postJson(apiBaseUrl, "/api/countdown/confirm", { durationMinutes }, activeUserId);
     } catch {
       // The local guard view remains responsive even when the demo backend is unavailable.
     }
@@ -235,7 +256,7 @@ export function HomeScreen({
   function toggleContact(contactId: string) {
     setContacts((current) =>
       current.map((contact) =>
-        contact.id === contactId
+        contact.id === contactId && contact.status === "confirmed"
           ? {
               ...contact,
               enabled: !contact.enabled,
@@ -245,17 +266,76 @@ export function HomeScreen({
     );
   }
 
-  function updateContactField(contactId: string, field: "email" | "name" | "phone", value: string) {
-    setContacts((current) =>
-      current.map((contact) =>
-        contact.id === contactId
-          ? {
-              ...contact,
-              [field]: value,
-            }
-          : contact,
-      ),
-    );
+  function openContactEditor() {
+    if (contacts.length >= 3) {
+      return;
+    }
+
+    setContactDraft(emptyContactDraft);
+    setContactError("");
+    setContactEditorOpen(true);
+  }
+
+  function updateContactDraft(field: "email" | "name" | "phone", value: string) {
+    setContactDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    setContactError("");
+  }
+
+  async function handleAddContact() {
+    if (!canAddContact) {
+      setContactError("请填写姓名和手机号");
+      return;
+    }
+
+    const contactToInvite: ContactOption = {
+      email: contactDraft.email.trim(),
+      enabled: false,
+      id: `local-contact-${Date.now()}`,
+      name: contactDraft.name.trim(),
+      phone: contactDraft.phone.trim(),
+      status: "pending",
+    };
+
+    try {
+      const result = await postJson<{ contact?: RemoteContact }>(
+        apiBaseUrl,
+        "/api/contacts/invite",
+        {
+          displayName: contactToInvite.name,
+          email: contactToInvite.email,
+          phone: contactToInvite.phone,
+        },
+        activeUserId,
+      );
+      if (!isValidRemoteContact(result?.contact)) {
+        throw new Error("Invite response did not include a contact");
+      }
+
+      const nextContact = mapRemoteContact(result.contact, contacts);
+
+      setContacts((current) => upsertContact(current, nextContact));
+      setWaitingContactId(nextContact.id);
+      setContactEditorOpen(false);
+      setContactDraft(emptyContactDraft);
+    } catch {
+      setContactError("邀请没有发送成功，请稍后再试。");
+    }
+  }
+
+  async function refreshContacts() {
+    try {
+      const result = await getJson<{ contacts?: RemoteContact[] }>(apiBaseUrl, "/api/contacts", activeUserId);
+      if (!Array.isArray(result.contacts)) {
+        return;
+      }
+
+      setContacts((current) => mergeRemoteContacts(current, result.contacts!));
+    } catch {
+      // Contact status refresh should never block the local guard flow.
+    }
   }
 
   function handleNightModeChange(preference: NightModePreference) {
@@ -288,16 +368,7 @@ export function HomeScreen({
       await postJson(apiBaseUrl, "/api/messages/review", {
         templateKey: selectedTemplate.key,
         shortNote: note.trim(),
-      }, userId);
-      await Promise.all(
-        reachableContacts.map((contact) =>
-          postJson(apiBaseUrl, "/api/contacts/invite", {
-            phone: contact.phone.trim(),
-            email: contact.email.trim(),
-            displayName: contact.name.trim(),
-          }, userId),
-        ),
-      );
+      }, activeUserId);
     } catch {
       // The prototype keeps local settings responsive even when the demo backend is unavailable.
     }
@@ -320,11 +391,12 @@ export function HomeScreen({
     setConfirmDialogOpen(false);
     setConfirmCodeInput("");
     setConfirmCodeError("");
-    setRemainingSeconds(durationMinutes * 60);
+    setRemainingSeconds(initialRemainingSeconds ?? durationMinutes * 60);
+    setPlanExpired(false);
     setSafetyConfirmed(true);
 
     try {
-      await postJson(apiBaseUrl, "/api/countdown/pause", {}, userId);
+      await postJson(apiBaseUrl, "/api/countdown/pause", {}, activeUserId);
     } catch {
       // The local safety confirmation is intentionally not blocked by network state.
     }
@@ -446,6 +518,24 @@ export function HomeScreen({
                 planStatus={`${reachableContacts.length} 位`}
               />
             </View>
+          ) : planExpired ? (
+            <View style={styles.guardBlock}>
+              <View style={styles.statusLine}>
+                <BreathingDot color={palette.safeGreen} />
+                <Text style={[styles.statusText, { color: palette.mutedText }]}>已到时间</Text>
+              </View>
+              <Text style={[styles.expiredTitle, { color: palette.text }]}>我可能已经失联</Text>
+              <Text style={[styles.expiredCaption, { color: palette.mutedText }]}>正在通知已确认联系人</Text>
+
+              <PlanSummary
+                contactDisplay={contactDisplay}
+                durationLabel={`${durationMinutes} 分钟`}
+                onPress={() => setSettingsOpen(true)}
+                palette={palette}
+                planStatus={`${reachableContacts.length} 位`}
+              />
+              <Text style={[styles.savedLine, { color: palette.mutedText }]}>{savedAt ? `${savedAt} 已保存` : ""}</Text>
+            </View>
           ) : (
             <View style={styles.guardBlock}>
               <View style={styles.statusLine}>
@@ -476,7 +566,7 @@ export function HomeScreen({
           {planStarted ? (
             <Pressable
               accessibilityRole="button"
-              disabled={safetyConfirmed}
+              disabled={safetyConfirmed || planExpired}
               onPress={openConfirmDialog}
               style={({ pressed }) => [
                 styles.primaryButton,
@@ -487,6 +577,13 @@ export function HomeScreen({
                       borderWidth: 1,
                       shadowOpacity: 0,
                     }
+                  : planExpired
+                    ? {
+                        backgroundColor: palette.safeButton,
+                        borderColor: palette.safeButtonBorder,
+                        borderWidth: 1,
+                        shadowOpacity: 0,
+                      }
                   : {
                       backgroundColor: palette.primaryButton,
                       opacity: pressed ? 0.82 : 1,
@@ -497,11 +594,11 @@ export function HomeScreen({
                 style={[
                   styles.primaryButtonText,
                   {
-                    color: safetyConfirmed ? palette.safeButtonText : palette.primaryButtonText,
+                    color: safetyConfirmed || planExpired ? palette.safeButtonText : palette.primaryButtonText,
                   },
                 ]}
               >
-                {safetyConfirmed ? `已确认安全，${returnCountdown}s 后回到首页` : "我还在"}
+                {safetyConfirmed ? `已确认安全，${returnCountdown}s 后回到首页` : planExpired ? "已触发失联提醒" : "我还在"}
               </Text>
             </Pressable>
           ) : (
@@ -517,7 +614,9 @@ export function HomeScreen({
                 },
               ]}
             >
-              <Text style={[styles.primaryButtonText, { color: palette.primaryButtonText }]}>开始守护</Text>
+              <Text style={[styles.primaryButtonText, { color: palette.primaryButtonText }]}>
+                {canStart ? "开始守护" : "添加并确认联系人后可开始"}
+              </Text>
             </Pressable>
           )}
         </View>
@@ -529,21 +628,27 @@ export function HomeScreen({
         contacts={contacts}
         nightModePreference={nightModePreference}
         note={note}
+        contactDraft={contactDraft}
+        contactError={contactError}
         onClose={() => setSettingsOpen(false)}
         onCloseContactEditor={() => setContactEditorOpen(false)}
+        onAddContact={handleAddContact}
         onNightModeChange={handleNightModeChange}
         onNoteChange={setNote}
-        onOpenContactEditor={() => setContactEditorOpen(true)}
+        onOpenContactEditor={openContactEditor}
+        onRefreshContacts={refreshContacts}
         onSave={handleSaveSettings}
         onSelectTemplate={setSelectedTemplateKey}
         onToggleContact={toggleContact}
-        onUpdateContactField={updateContactField}
+        onUpdateContactDraft={updateContactDraft}
         palette={palette}
         previewMessage={previewMessage}
         reachableCount={reachableContacts.length}
         selectedTemplateKey={selectedTemplateKey}
         templates={templates}
         visible={settingsOpen}
+        waitingContact={waitingContact}
+        onCloseWaitingContact={() => setWaitingContactId(null)}
       />
 
       <ConfirmCodeDialog
@@ -598,16 +703,10 @@ function CloseIcon({ color, size = 18 }: IconProps) {
   );
 }
 
-function PencilIcon({ color, size = 17 }: IconProps) {
+function PlusIcon({ color, size = 18 }: IconProps) {
   return (
-    <Svg fill="none" height={size} viewBox="0 0 17 17" width={size}>
-      <Path
-        d="M9.9 3.1 13.9 7M3.9 13.1l1.2-4.2 6.7-6.8a1.5 1.5 0 0 1 2.1 0l1 1a1.5 1.5 0 0 1 0 2.1l-6.7 6.7-4.3 1.2Z"
-        stroke={color}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.55}
-      />
+    <Svg fill="none" height={size} viewBox="0 0 18 18" width={size}>
+      <Path d="M9 4v10M4 9h10" stroke={color} strokeLinecap="round" strokeWidth={1.8} />
     </Svg>
   );
 }
@@ -846,44 +945,56 @@ function SettingsSheet({
   bottomInset,
   contactEditorOpen,
   contacts,
+  contactDraft,
+  contactError,
   nightModePreference,
   note,
+  onAddContact,
   onClose,
   onCloseContactEditor,
+  onCloseWaitingContact,
   onNightModeChange,
   onNoteChange,
   onOpenContactEditor,
+  onRefreshContacts,
   onSave,
   onSelectTemplate,
   onToggleContact,
-  onUpdateContactField,
+  onUpdateContactDraft,
   palette,
   previewMessage,
   reachableCount,
   selectedTemplateKey,
   templates,
   visible,
+  waitingContact,
 }: {
   bottomInset: number;
   contactEditorOpen: boolean;
   contacts: ContactOption[];
+  contactDraft: typeof emptyContactDraft;
+  contactError: string;
   nightModePreference: NightModePreference;
   note: string;
+  onAddContact: () => void;
   onClose: () => void;
   onCloseContactEditor: () => void;
+  onCloseWaitingContact: () => void;
   onNightModeChange: (preference: NightModePreference) => void;
   onNoteChange: (note: string) => void;
   onOpenContactEditor: () => void;
+  onRefreshContacts: () => void;
   onSave: () => void;
   onSelectTemplate: (templateKey: string) => void;
   onToggleContact: (contactId: string) => void;
-  onUpdateContactField: (contactId: string, field: "email" | "name" | "phone", value: string) => void;
+  onUpdateContactDraft: (field: "email" | "name" | "phone", value: string) => void;
   palette: Palette;
   previewMessage: string;
   reachableCount: number;
   selectedTemplateKey: string;
   templates: TemplateOption[];
   visible: boolean;
+  waitingContact: ContactOption | null;
 }) {
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
@@ -925,30 +1036,51 @@ function SettingsSheet({
 
             <View style={styles.sheetSectionHead}>
               <Text style={[styles.sheetSectionTitle, { color: palette.text }]}>联系人</Text>
-              <Pressable accessibilityLabel="编辑联系人" accessibilityRole="button" hitSlop={12} onPress={onOpenContactEditor} style={styles.editIconButton}>
-                <PencilIcon color={palette.mutedText} />
+              <Pressable
+                accessibilityLabel="添加联系人"
+                accessibilityRole="button"
+                disabled={contacts.length >= 3}
+                hitSlop={12}
+                onPress={onOpenContactEditor}
+                style={[styles.editIconButton, { opacity: contacts.length >= 3 ? 0.34 : 1 }]}
+              >
+                <PlusIcon color={palette.mutedText} />
               </Pressable>
             </View>
 
             <View style={[styles.contactList, { borderColor: palette.hairline }]}>
-              {contacts.map((contact, index) => (
-                <View
-                  key={contact.id}
-                  style={[
-                    styles.contactSwitchRow,
-                    index > 0 ? { borderTopColor: palette.hairline, borderTopWidth: StyleSheet.hairlineWidth } : null,
-                  ]}
-                >
-                  <Text style={[styles.contactSwitchName, { color: palette.text }]}>{contact.name}</Text>
-                  <Switch
-                    accessibilityLabel={`${contact.name}接收提醒`}
-                    onValueChange={() => onToggleContact(contact.id)}
-                    thumbColor="#FFFFFF"
-                    trackColor={{ false: palette.switchOff, true: palette.safeGreen }}
-                    value={contact.enabled}
-                  />
+              {contacts.length === 0 ? (
+                <View style={styles.emptyContactState}>
+                  <Text style={[styles.emptyContactTitle, { color: palette.text }]}>还没有联系人</Text>
+                  <Text style={[styles.emptyContactHint, { color: palette.mutedText }]}>添加并确认后才能用于失联提醒。</Text>
                 </View>
-              ))}
+              ) : (
+                contacts.map((contact, index) => (
+                  <View
+                    key={contact.id}
+                    style={[
+                      styles.contactSwitchRow,
+                      index > 0 ? { borderTopColor: palette.hairline, borderTopWidth: StyleSheet.hairlineWidth } : null,
+                    ]}
+                  >
+                    <View style={styles.contactSwitchCopy}>
+                      <Text style={[styles.contactSwitchName, { color: palette.text }]}>{contact.name}</Text>
+                      <Text style={[styles.contactStatusText, { color: getContactStatusColor(contact.status, palette) }]}>
+                        {getContactStatusLabel(contact.status)}
+                      </Text>
+                    </View>
+                    {contact.status === "confirmed" ? (
+                      <Switch
+                        accessibilityLabel={`${contact.name}接收提醒`}
+                        onValueChange={() => onToggleContact(contact.id)}
+                        thumbColor="#FFFFFF"
+                        trackColor={{ false: palette.switchOff, true: palette.safeGreen }}
+                        value={contact.enabled}
+                      />
+                    ) : null}
+                  </View>
+                ))
+              )}
             </View>
 
             <Text style={[styles.sheetSectionTitle, { color: palette.text }]}>失联预案</Text>
@@ -1003,7 +1135,7 @@ function SettingsSheet({
             </View>
 
             <Text style={[styles.settingsStatus, { color: palette.mutedText }]}>
-              {reachableCount > 0 ? `${reachableCount} 位联系人会接收提醒。` : "请补全已开启联系人的姓名和联系方式。"}
+              {reachableCount > 0 ? `${reachableCount} 位联系人会接收提醒。` : "添加并确认联系人后才能开始。"}
             </Text>
           </ScrollView>
 
@@ -1022,11 +1154,19 @@ function SettingsSheet({
           </View>
 
           <ContactEditor
-            contacts={contacts}
+            contactDraft={contactDraft}
+            contactError={contactError}
             onClose={onCloseContactEditor}
-            onUpdateContactField={onUpdateContactField}
+            onSave={onAddContact}
+            onUpdateContactDraft={onUpdateContactDraft}
             palette={palette}
             visible={contactEditorOpen}
+          />
+          <ContactWaitingSheet
+            contact={waitingContact}
+            onClose={onCloseWaitingContact}
+            onRefresh={onRefreshContacts}
+            palette={palette}
           />
         </View>
       </View>
@@ -1035,15 +1175,19 @@ function SettingsSheet({
 }
 
 function ContactEditor({
-  contacts,
+  contactDraft,
+  contactError,
   onClose,
-  onUpdateContactField,
+  onSave,
+  onUpdateContactDraft,
   palette,
   visible,
 }: {
-  contacts: ContactOption[];
+  contactDraft: typeof emptyContactDraft;
+  contactError: string;
   onClose: () => void;
-  onUpdateContactField: (contactId: string, field: "email" | "name" | "phone", value: string) => void;
+  onSave: () => void;
+  onUpdateContactDraft: (field: "email" | "name" | "phone", value: string) => void;
   palette: Palette;
   visible: boolean;
 }) {
@@ -1053,52 +1197,106 @@ function ContactEditor({
         <Pressable accessibilityLabel="关闭联系人编辑遮罩" onPress={onClose} style={styles.editorBackdrop} />
         <View style={[styles.editorPanel, { backgroundColor: palette.surface }]}>
           <View style={styles.editorHeader}>
-            <Text style={[styles.sheetTitle, { color: palette.text }]}>联系人</Text>
+            <Text style={[styles.sheetTitle, { color: palette.text }]}>添加联系人</Text>
             <Pressable accessibilityLabel="关闭联系人编辑" accessibilityRole="button" hitSlop={12} onPress={onClose} style={styles.closeButton}>
               <CloseIcon color={palette.text} />
             </Pressable>
           </View>
 
           <ScrollView contentContainerStyle={styles.editorBody} showsVerticalScrollIndicator={false}>
-            {contacts.map((contact, index) => (
-              <View key={contact.id} style={[styles.contactEditBlock, { borderColor: palette.hairline }]}>
-                <View style={styles.contactEditHead}>
-                  <Text style={[styles.contactEditTitle, { color: palette.text }]}>{contact.name || `联系人 ${index + 1}`}</Text>
-                  <Text style={[styles.contactEditState, { color: palette.mutedText }]}>{contact.enabled ? "已开启" : "未开启"}</Text>
-                </View>
-                <FieldLabel label="姓名" palette={palette}>
-                  <TextInput
-                    accessibilityLabel={`联系人${index + 1}姓名`}
-                    onChangeText={(value) => onUpdateContactField(contact.id, "name", value)}
-                    style={[styles.textInput, { borderColor: palette.hairline, color: palette.text }]}
-                    value={contact.name}
-                  />
-                </FieldLabel>
-                <FieldLabel label="电话" palette={palette}>
-                  <TextInput
-                    accessibilityLabel={`联系人${index + 1}电话`}
-                    inputMode="tel"
-                    keyboardType="phone-pad"
-                    onChangeText={(value) => onUpdateContactField(contact.id, "phone", value)}
-                    style={[styles.textInput, { borderColor: palette.hairline, color: palette.text }]}
-                    value={contact.phone}
-                  />
-                </FieldLabel>
-                <FieldLabel label="邮箱" palette={palette}>
-                  <TextInput
-                    accessibilityLabel={`联系人${index + 1}邮箱`}
-                    inputMode="email"
-                    keyboardType="email-address"
-                    onChangeText={(value) => onUpdateContactField(contact.id, "email", value)}
-                    placeholder="选填"
-                    placeholderTextColor={palette.placeholder}
-                    style={[styles.textInput, { borderColor: palette.hairline, color: palette.text }]}
-                    value={contact.email}
-                  />
-                </FieldLabel>
-              </View>
-            ))}
+            <FieldLabel label="姓名" palette={palette}>
+              <TextInput
+                accessibilityLabel="联系人姓名"
+                onChangeText={(value) => onUpdateContactDraft("name", value)}
+                placeholder="输入姓名"
+                placeholderTextColor={palette.placeholder}
+                style={[styles.textInput, { borderColor: palette.hairline, color: palette.text }]}
+                value={contactDraft.name}
+              />
+            </FieldLabel>
+            <FieldLabel label="电话" palette={palette}>
+              <TextInput
+                accessibilityLabel="联系人电话"
+                inputMode="tel"
+                keyboardType="phone-pad"
+                onChangeText={(value) => onUpdateContactDraft("phone", value)}
+                placeholder="输入手机号"
+                placeholderTextColor={palette.placeholder}
+                style={[styles.textInput, { borderColor: palette.hairline, color: palette.text }]}
+                value={contactDraft.phone}
+              />
+            </FieldLabel>
+            <FieldLabel label="邮箱" palette={palette}>
+              <TextInput
+                accessibilityLabel="联系人邮箱"
+                inputMode="email"
+                keyboardType="email-address"
+                onChangeText={(value) => onUpdateContactDraft("email", value)}
+                placeholder="选填"
+                placeholderTextColor={palette.placeholder}
+                style={[styles.textInput, { borderColor: palette.hairline, color: palette.text }]}
+                value={contactDraft.email}
+              />
+            </FieldLabel>
+            <Text style={[styles.confirmError, { color: palette.danger }]}>{contactError}</Text>
+            <Pressable accessibilityRole="button" onPress={onSave} style={[styles.confirmSubmitButton, { backgroundColor: palette.primaryButton }]}>
+              <Text style={[styles.primaryButtonText, { color: palette.primaryButtonText }]}>发送邀请</Text>
+            </Pressable>
           </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function ContactWaitingSheet({
+  contact,
+  onClose,
+  onRefresh,
+  palette,
+}: {
+  contact: ContactOption | null;
+  onClose: () => void;
+  onRefresh: () => void;
+  palette: Palette;
+}) {
+  if (!contact) {
+    return null;
+  }
+
+  const confirmed = contact.status === "confirmed";
+  const unavailable = contact.status === "blocked" || contact.status === "declined" || contact.status === "reported";
+  const title = confirmed ? "联系人已确认" : unavailable ? "联系人不可用" : `等待${contact.name}确认`;
+  const mainText = confirmed
+    ? `${contact.name}已同意成为紧急联系人`
+    : unavailable
+      ? `${contact.name}${getContactStatusLabel(contact.status)}`
+      : "邀请已发送";
+  const hintText = confirmed
+    ? "现在可以开启联系人并开始守护。"
+    : unavailable
+      ? "该联系人不能用于失联提醒，请添加其他联系人。"
+      : "确认后才能用于失联提醒";
+
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible>
+      <View style={styles.confirmRoot}>
+        <Pressable accessibilityLabel="关闭联系人等待遮罩" onPress={onClose} style={styles.confirmBackdrop} />
+        <View style={[styles.confirmPanel, { backgroundColor: palette.surface }]}>
+          <View style={styles.confirmHeader}>
+            <Text style={[styles.sheetTitle, { color: palette.text }]}>{title}</Text>
+            <Pressable accessibilityLabel="关闭联系人等待" accessibilityRole="button" hitSlop={12} onPress={onClose} style={styles.closeButton}>
+              <CloseIcon color={palette.text} />
+            </Pressable>
+          </View>
+          <Text style={[styles.waitingTitle, { color: unavailable ? palette.danger : palette.text }]}>{mainText}</Text>
+          <Text style={[styles.waitingHint, { color: palette.mutedText }]}>{hintText}</Text>
+          <Pressable accessibilityRole="button" onPress={onRefresh} style={[styles.confirmSubmitButton, { backgroundColor: palette.primaryButton }]}>
+            <Text style={[styles.primaryButtonText, { color: palette.primaryButtonText }]}>刷新状态</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={onClose} style={[styles.secondaryButton, { borderColor: palette.hairline }]}>
+            <Text style={[styles.secondaryButtonText, { color: palette.text }]}>返回设置</Text>
+          </Pressable>
         </View>
       </View>
     </Modal>
@@ -1174,12 +1372,119 @@ function FieldLabel({
   );
 }
 
-async function postJson(
+function mapRemoteContact(remoteContact: RemoteContact, currentContacts: ContactOption[]): ContactOption {
+  const id = typeof remoteContact.id === "string" && remoteContact.id ? remoteContact.id : `remote-contact-${Date.now()}`;
+  const previous = currentContacts.find((contact) => contact.id === id);
+  const status = normalizeContactStatus(remoteContact.status);
+
+  return {
+    email: typeof remoteContact.email === "string" ? remoteContact.email : "",
+    enabled: status === "confirmed" ? previous?.enabled ?? true : false,
+    id,
+    name: typeof remoteContact.displayName === "string" ? remoteContact.displayName : previous?.name ?? "未命名",
+    phone: typeof remoteContact.phone === "string" ? remoteContact.phone : "",
+    status,
+  };
+}
+
+function isValidRemoteContact(contact: RemoteContact | undefined): contact is RemoteContact {
+  return (
+    Boolean(contact) &&
+    typeof contact?.id === "string" &&
+    contact.id.trim().length > 0 &&
+    typeof contact.displayName === "string" &&
+    contact.displayName.trim().length > 0
+  );
+}
+
+function mergeRemoteContacts(currentContacts: ContactOption[], remoteContacts: RemoteContact[]): ContactOption[] {
+  const mappedContacts = remoteContacts.map((contact) => mapRemoteContact(contact, currentContacts));
+  if (mappedContacts.length === 0) {
+    return currentContacts;
+  }
+
+  const mappedIds = new Set(mappedContacts.map((contact) => contact.id));
+  const localPendingContacts = currentContacts.filter(
+    (contact) => contact.status === "pending" && !mappedIds.has(contact.id),
+  );
+
+  return [...mappedContacts, ...localPendingContacts].slice(0, 3);
+}
+
+function normalizeContactStatus(status: unknown): ContactStatus {
+  if (
+    status === "blocked" ||
+    status === "confirmed" ||
+    status === "declined" ||
+    status === "pending" ||
+    status === "reported"
+  ) {
+    return status;
+  }
+
+  return "pending";
+}
+
+function upsertContact(currentContacts: ContactOption[], nextContact: ContactOption): ContactOption[] {
+  const existingIndex = currentContacts.findIndex((contact) => contact.id === nextContact.id);
+  if (existingIndex < 0) {
+    return [...currentContacts, nextContact].slice(0, 3);
+  }
+
+  return currentContacts.map((contact, index) => (index === existingIndex ? nextContact : contact));
+}
+
+function getContactStatusLabel(status: ContactStatus) {
+  if (status === "confirmed") {
+    return "已确认";
+  }
+  if (status === "declined") {
+    return "已拒绝";
+  }
+  if (status === "blocked") {
+    return "已屏蔽";
+  }
+  if (status === "reported") {
+    return "已举报";
+  }
+  return "待确认";
+}
+
+function getContactStatusColor(status: ContactStatus, palette: Palette) {
+  if (status === "confirmed") {
+    return palette.safeButtonText;
+  }
+  if (status === "declined" || status === "blocked" || status === "reported") {
+    return palette.danger;
+  }
+  return palette.mutedText;
+}
+
+async function getJson<T>(
+  apiBaseUrl: string,
+  path: string,
+  userId: string,
+): Promise<T> {
+  const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}${path}`, {
+    headers: {
+      "x-demo-user-id": userId,
+    },
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Request failed with ${response.status}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+async function postJson<T = unknown>(
   apiBaseUrl: string,
   path: string,
   body: Record<string, unknown>,
   userId: string,
-): Promise<void> {
+): Promise<T> {
   const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}${path}`, {
     body: JSON.stringify(body),
     headers: {
@@ -1192,6 +1497,8 @@ async function postJson(
   if (!response.ok) {
     throw new Error(`Request failed with ${response.status}`);
   }
+
+  return (await response.json().catch(() => ({}))) as T;
 }
 
 function formatSeconds(totalSeconds: number) {
@@ -1341,8 +1648,16 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     overflow: "hidden",
   },
-  contactSwitchName: {
+  contactStatusText: {
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 3,
+  },
+  contactSwitchCopy: {
     flex: 1,
+    minWidth: 0,
+  },
+  contactSwitchName: {
     fontSize: 16,
     fontWeight: "700",
   },
@@ -1397,6 +1712,35 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.34)",
     flex: 1,
     justifyContent: "center",
+  },
+  emptyContactHint: {
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+  emptyContactState: {
+    gap: 4,
+    minHeight: 78,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  emptyContactTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  expiredCaption: {
+    fontSize: 16,
+    fontWeight: "800",
+    lineHeight: 22,
+    textAlign: "center",
+  },
+  expiredTitle: {
+    fontSize: 34,
+    fontWeight: "900",
+    letterSpacing: 0,
+    lineHeight: 42,
+    marginTop: spacing.xl,
+    textAlign: "center",
   },
   field: {
     gap: spacing.xs,
@@ -1765,5 +2109,26 @@ const styles = StyleSheet.create({
     textAlign: "center",
     width: 38,
     zIndex: 2,
+  },
+  secondaryButton: {
+    alignItems: "center",
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: "center",
+    minHeight: 52,
+  },
+  secondaryButtonText: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  waitingHint: {
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
+  waitingTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    lineHeight: 25,
   },
 });

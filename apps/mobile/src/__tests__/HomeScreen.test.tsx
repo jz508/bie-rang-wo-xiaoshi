@@ -13,6 +13,8 @@ const safeAreaMetrics = {
   insets: { bottom: 34, left: 0, right: 0, top: 24 },
 };
 
+jest.setTimeout(30000);
+
 function renderWithSafeArea(children: ReactElement) {
   return render(<SafeAreaProvider initialMetrics={safeAreaMetrics}>{children}</SafeAreaProvider>);
 }
@@ -35,12 +37,36 @@ async function openSettings() {
   });
 }
 
+async function addContact({
+  email = "zhouning@example.com",
+  name = "周宁",
+  phone = "13700137000",
+}: {
+  email?: string;
+  name?: string;
+  phone?: string;
+} = {}) {
+  await fireEvent.press(screen.getByLabelText("添加联系人"));
+  await waitFor(() => {
+    expect(screen.getByText("添加联系人")).toBeTruthy();
+  });
+  await fireEvent.changeText(screen.getByLabelText("联系人姓名"), name);
+  await fireEvent.changeText(screen.getByLabelText("联系人电话"), phone);
+  await fireEvent.changeText(screen.getByLabelText("联系人邮箱"), email);
+  await fireEvent.press(screen.getByText("发送邀请"));
+}
+
 describe("HomeScreen", () => {
   const fetchMock = jest.fn();
 
   beforeEach(async () => {
+    jest.useRealTimers();
     jest.clearAllMocks();
-    fetchMock.mockResolvedValue({ ok: true, status: 200 });
+    fetchMock.mockResolvedValue({
+      json: async () => ({ contacts: [] }),
+      ok: true,
+      status: 200,
+    });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     await AsyncStorage.clear();
   });
@@ -55,11 +81,56 @@ describe("HomeScreen", () => {
     await login();
 
     expect(screen.getByText("2 小时 15 分钟")).toBeTruthy();
-    expect(screen.getByText("开始守护")).toBeTruthy();
-    expect(screen.getByText("陈默、张三")).toBeTruthy();
+    expect(screen.getByText("添加并确认联系人后可开始")).toBeTruthy();
+    expect(screen.getByText("未添加")).toBeTruthy();
+    expect(screen.queryByText("陈默")).toBeNull();
   });
 
-  it("keeps contacts and reserved messages inside the settings sheet", async () => {
+  it("starts with empty contacts and shows the waiting confirmation screen after adding one", async () => {
+    let refreshShouldConfirm = false;
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === "https://app.test/api/contacts/invite") {
+        return {
+          json: async () => ({
+            contact: {
+              displayName: "周宁",
+              email: "zhouning@example.com",
+              id: "contact-1",
+              phone: "13700137000",
+              status: "pending",
+            },
+          }),
+          ok: true,
+          status: 200,
+        };
+      }
+      if (url === "https://app.test/api/contacts" && options?.method === "GET") {
+        return {
+          json: async () => ({
+            contacts: refreshShouldConfirm
+              ? [
+                  {
+                    displayName: "周宁",
+                    email: "zhouning@example.com",
+                    id: "contact-1",
+                    phone: "13700137000",
+                    status: "confirmed",
+                  },
+                ]
+              : [],
+          }),
+          ok: true,
+          status: 200,
+        };
+      }
+
+      return {
+        json: async () => ({ contacts: [] }),
+        ok: true,
+        status: 200,
+      };
+    });
+
     await renderWithSafeArea(<HomeScreen apiBaseUrl="https://app.test" userId="user-1" />);
     await login();
 
@@ -69,57 +140,167 @@ describe("HomeScreen", () => {
     expect(screen.getByText("自动")).toBeTruthy();
     expect(screen.getByText("开启")).toBeTruthy();
     expect(screen.getAllByText("联系人").length).toBeGreaterThan(0);
+    expect(screen.getByText("还没有联系人")).toBeTruthy();
     expect(screen.getByText("失联预案")).toBeTruthy();
 
-    await fireEvent.press(screen.getByLabelText("编辑联系人"));
+    await addContact();
+
     await waitFor(() => {
-      expect(screen.getByLabelText("联系人1姓名")).toBeTruthy();
+      expect(screen.getByText("等待周宁确认")).toBeTruthy();
     });
-    await fireEvent.changeText(screen.getByLabelText("联系人1姓名"), "周宁");
-    await fireEvent.changeText(screen.getByLabelText("联系人1电话"), "13700137000");
-    await fireEvent.changeText(screen.getByLabelText("联系人1邮箱"), "zhouning@example.com");
-    await fireEvent.press(screen.getByLabelText("关闭联系人编辑"));
-    await fireEvent.changeText(screen.getByLabelText("短备注"), "备用钥匙在物业");
-    await fireEvent.press(screen.getByText("保存并返回"));
+    expect(screen.getByText("邀请已发送")).toBeTruthy();
+    expect(screen.getByText("确认后才能用于失联提醒")).toBeTruthy();
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://app.test/api/messages/review",
+        "https://app.test/api/contacts/invite",
         expect.objectContaining({
           body: JSON.stringify({
-            templateKey: "find_me",
-            shortNote: "备用钥匙在物业",
+            displayName: "周宁",
+            email: "zhouning@example.com",
+            phone: "13700137000",
           }),
           method: "POST",
         }),
       );
     });
-    expect(fetchMock).toHaveBeenCalledWith(
+
+    refreshShouldConfirm = true;
+    await fireEvent.press(screen.getByText("刷新状态"));
+    await waitFor(() => {
+      expect(screen.getByText("联系人已确认")).toBeTruthy();
+    });
+    await fireEvent.press(screen.getByText("返回设置"));
+    expect(screen.getByText("周宁")).toBeTruthy();
+    expect(screen.getByText("已确认")).toBeTruthy();
+  });
+
+  it("does not show a waiting confirmation screen when the invite fails", async () => {
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === "https://app.test/api/contacts" && options?.method === "GET") {
+        return {
+          json: async () => ({ contacts: [] }),
+          ok: true,
+          status: 200,
+        };
+      }
+      if (url === "https://app.test/api/contacts/invite") {
+        return {
+          json: async () => ({ error: "SMS provider is not configured" }),
+          ok: false,
+          status: 503,
+        };
+      }
+
+      return {
+        json: async () => ({}),
+        ok: true,
+        status: 200,
+      };
+    });
+
+    await renderWithSafeArea(<HomeScreen apiBaseUrl="https://app.test" userId="user-1" />);
+    await login();
+    await openSettings();
+    await addContact();
+
+    await waitFor(() => {
+      expect(screen.getByText("邀请没有发送成功，请稍后再试。")).toBeTruthy();
+    });
+    expect(screen.queryByText("等待周宁确认")).toBeNull();
+    expect(screen.queryByText("邀请已发送")).toBeNull();
+  });
+
+  it("does not show a waiting confirmation screen when the invite response is missing a contact", async () => {
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === "https://app.test/api/contacts" && options?.method === "GET") {
+        return {
+          json: async () => ({ contacts: [] }),
+          ok: true,
+          status: 200,
+        };
+      }
+      if (url === "https://app.test/api/contacts/invite") {
+        return {
+          json: async () => ({}),
+          ok: true,
+          status: 200,
+        };
+      }
+
+      return {
+        json: async () => ({}),
+        ok: true,
+        status: 200,
+      };
+    });
+
+    await renderWithSafeArea(<HomeScreen apiBaseUrl="https://app.test" userId="user-1" />);
+    await login();
+    await openSettings();
+    await addContact();
+
+    await waitFor(() => {
+      expect(screen.getByText("邀请没有发送成功，请稍后再试。")).toBeTruthy();
+    });
+    expect(screen.queryByText("等待周宁确认")).toBeNull();
+    expect(screen.queryByText("邀请已发送")).toBeNull();
+  });
+
+  it("requires a phone number before sending a contact invite", async () => {
+    await renderWithSafeArea(<HomeScreen apiBaseUrl="https://app.test" userId="user-1" />);
+    await login();
+    await openSettings();
+    await fireEvent.press(screen.getByLabelText("添加联系人"));
+    await waitFor(() => {
+      expect(screen.getByText("添加联系人")).toBeTruthy();
+    });
+    await fireEvent.changeText(screen.getByLabelText("联系人姓名"), "周宁");
+    await fireEvent.changeText(screen.getByLabelText("联系人邮箱"), "zhouning@example.com");
+    await fireEvent.press(screen.getByText("发送邀请"));
+
+    expect(screen.getByText("请填写姓名和手机号")).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalledWith(
       "https://app.test/api/contacts/invite",
       expect.objectContaining({
-        body: expect.stringContaining('"displayName":"周宁"'),
-        method: "POST",
-      }),
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://app.test/api/contacts/invite",
-      expect.objectContaining({
-        body: expect.stringContaining('"phone":"13700137000"'),
-        method: "POST",
-      }),
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://app.test/api/contacts/invite",
-      expect.objectContaining({
-        body: expect.stringContaining('"email":"zhouning@example.com"'),
         method: "POST",
       }),
     );
   });
 
   it("requires the safety code before confirming and then shows the recessed green safe state", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === "https://app.test/api/contacts/invite") {
+        return {
+          json: async () => ({
+            contact: {
+              displayName: "周宁",
+              email: "zhouning@example.com",
+              id: "contact-1",
+              phone: "13700137000",
+              status: "confirmed",
+            },
+          }),
+          ok: true,
+          status: 200,
+        };
+      }
+      return {
+        json: async () => ({ contacts: [] }),
+        ok: true,
+        status: 200,
+      };
+    });
     await renderWithSafeArea(<HomeScreen apiBaseUrl="https://app.test" userId="user-1" />);
     await login();
+    await openSettings();
+    await addContact();
+    await waitFor(() => {
+      expect(screen.getByText("联系人已确认")).toBeTruthy();
+    });
+    await fireEvent.press(screen.getByText("返回设置"));
+    await fireEvent.changeText(screen.getByLabelText("短备注"), "备用钥匙在物业");
+    await fireEvent.press(screen.getByText("保存并返回"));
 
     await fireEvent.press(screen.getByText("开始守护"));
 
@@ -158,6 +339,51 @@ describe("HomeScreen", () => {
         method: "POST",
       }),
     );
+  });
+
+  it("moves to a triggered state when the countdown reaches zero", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === "https://app.test/api/contacts/invite") {
+        return {
+          json: async () => ({
+            contact: {
+              displayName: "周宁",
+              email: "zhouning@example.com",
+              id: "contact-1",
+              phone: "13700137000",
+              status: "confirmed",
+            },
+          }),
+          ok: true,
+          status: 200,
+        };
+      }
+      return {
+        json: async () => ({ contacts: [] }),
+        ok: true,
+        status: 200,
+      };
+    });
+
+    await renderWithSafeArea(<HomeScreen apiBaseUrl="https://app.test" initialRemainingSeconds={1} userId="user-1" />);
+    await login();
+    await openSettings();
+    await addContact();
+    await waitFor(() => {
+      expect(screen.getByText("联系人已确认")).toBeTruthy();
+    });
+    await fireEvent.press(screen.getByText("返回设置"));
+    await fireEvent.press(screen.getByText("保存并返回"));
+    await fireEvent.press(screen.getByText("开始守护"));
+
+    await waitFor(
+      () => {
+        expect(screen.getByText("我可能已经失联")).toBeTruthy();
+      },
+      { timeout: 3000 },
+    );
+    expect(screen.getByText("正在通知已确认联系人")).toBeTruthy();
+    expect(screen.getByText("已触发失联提醒")).toBeTruthy();
   });
 
   it("applies stored night mode to the app shell home route", async () => {

@@ -3,7 +3,7 @@ import Constants from "expo-constants";
 import { HomeScreen } from "../src/screens/HomeScreen";
 import { useThemeState } from "../src/theme/ThemeProvider";
 
-const DEFAULT_API_BASE_URL = "https://bie-rang-wo-xiaoshi-web.vercel.app";
+const DEFAULT_API_BASE_URL = "https://brwxs.com";
 
 export default function IndexRoute() {
   const { nightModePreference, setNightModePreference, setThemeName, themeName } = useThemeState();
