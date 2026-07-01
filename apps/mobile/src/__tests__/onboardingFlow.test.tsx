@@ -26,6 +26,7 @@ async function login(view: RenderResult) {
   await waitFor(() => {
     expect(view.getByLabelText("手机号")).toHaveProp("value", "13900139000");
   });
+  await fireEvent.changeText(view.getByLabelText("测试码"), "1234");
   await fireEvent.press(view.getByText("登录"));
   await waitFor(() => {
     expect(view.getByText("失联时间")).toBeTruthy();

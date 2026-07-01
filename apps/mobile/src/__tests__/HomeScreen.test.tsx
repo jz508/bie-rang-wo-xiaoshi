@@ -24,6 +24,7 @@ async function login() {
   await waitFor(() => {
     expect(screen.getByLabelText("手机号")).toHaveProp("value", "13900139000");
   });
+  await fireEvent.changeText(screen.getByLabelText("测试码"), "1234");
   await fireEvent.press(screen.getByText("登录"));
   await waitFor(() => {
     expect(screen.getByText("失联时间")).toBeTruthy();
@@ -76,6 +77,7 @@ describe("HomeScreen", () => {
 
     expect(screen.getByText("别让我消失")).toBeTruthy();
     expect(screen.getByLabelText("手机号")).toBeTruthy();
+    expect(screen.getByLabelText("测试码")).toBeTruthy();
     expect(screen.queryByText("守护中")).toBeNull();
 
     await login();
@@ -84,6 +86,18 @@ describe("HomeScreen", () => {
     expect(screen.getByText("添加并确认联系人后可开始")).toBeTruthy();
     expect(screen.getByText("未添加")).toBeTruthy();
     expect(screen.queryByText("陈默")).toBeNull();
+  });
+
+  it("keeps the transition login local and rejects a wrong test code", async () => {
+    await renderWithSafeArea(<HomeScreen apiBaseUrl="https://app.test" />);
+
+    await fireEvent.changeText(screen.getByLabelText("手机号"), "13900139000");
+    await fireEvent.changeText(screen.getByLabelText("测试码"), "0000");
+    await fireEvent.press(screen.getByText("登录"));
+
+    expect(screen.getByText("测试码不正确")).toBeTruthy();
+    expect(screen.queryByText("失联时间")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("starts with empty contacts and shows the waiting confirmation screen after adding one", async () => {

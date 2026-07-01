@@ -311,11 +311,11 @@ export default function HomePage() {
                 />
               </label>
               <label className="field">
-                <span>验证码</span>
+                <span>测试码</span>
                 <input
                   inputMode="numeric"
                   onChange={(event) => setCodeInput(event.target.value)}
-                  placeholder="选填"
+                  placeholder="输入测试码"
                   type="text"
                   value={codeInput}
                 />

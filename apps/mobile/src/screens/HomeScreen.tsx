@@ -57,6 +57,7 @@ type HomeScreenProps = {
 const confirmCode = "1234";
 const defaultApiBaseUrl = "https://brwxs.com";
 const safetyReturnSeconds = 5;
+const transitionLoginCode = "1234";
 const wheelItemHeight = 42;
 
 const nightModeOptions: Array<{ label: string; value: NightModePreference }> = [
@@ -96,6 +97,7 @@ export function HomeScreen({
   const [loggedIn, setLoggedIn] = useState(false);
   const [phoneInput, setPhoneInput] = useState("");
   const [loginCodeInput, setLoginCodeInput] = useState("");
+  const [loginCodeError, setLoginCodeError] = useState("");
   const [hours, setHours] = useState(2);
   const [minutes, setMinutes] = useState(15);
   const [planStarted, setPlanStarted] = useState(false);
@@ -135,7 +137,7 @@ export function HomeScreen({
   const waitingContact = waitingContactId ? contacts.find((contact) => contact.id === waitingContactId) ?? null : null;
   const selectedTemplate = templates.find((template) => template.key === selectedTemplateKey) ?? templates[0];
   const durationMinutes = hours * 60 + minutes;
-  const canLogin = phoneInput.trim().length >= 5;
+  const canLogin = phoneInput.trim().length >= 5 && loginCodeInput.trim().length > 0;
   const canStart = durationMinutes > 0 && reachableContacts.length > 0;
   const canAddContact =
     contacts.length < 3 &&
@@ -228,9 +230,17 @@ export function HomeScreen({
   }, [homeEntrance, loggedIn]);
 
   function handleLogin() {
-    if (canLogin) {
-      setLoggedIn(true);
+    if (!canLogin) {
+      return;
     }
+
+    if (loginCodeInput.trim() !== transitionLoginCode) {
+      setLoginCodeError("测试码不正确");
+      return;
+    }
+
+    setLoginCodeError("");
+    setLoggedIn(true);
   }
 
   async function handleStartPlan() {
@@ -423,18 +433,22 @@ export function HomeScreen({
                 value={phoneInput}
               />
             </FieldLabel>
-            <FieldLabel label="验证码" palette={palette}>
+            <FieldLabel label="测试码" palette={palette}>
               <TextInput
-                accessibilityLabel="验证码"
+                accessibilityLabel="测试码"
                 inputMode="numeric"
                 keyboardType="number-pad"
-                onChangeText={setLoginCodeInput}
-                placeholder="选填"
+                onChangeText={(value) => {
+                  setLoginCodeInput(value);
+                  setLoginCodeError("");
+                }}
+                placeholder="输入测试码"
                 placeholderTextColor={palette.placeholder}
                 style={[styles.textInput, { borderColor: palette.hairline, color: palette.text }]}
                 value={loginCodeInput}
               />
             </FieldLabel>
+            <Text style={[styles.confirmError, { color: palette.danger }]}>{loginCodeError}</Text>
           </View>
 
           <Pressable
