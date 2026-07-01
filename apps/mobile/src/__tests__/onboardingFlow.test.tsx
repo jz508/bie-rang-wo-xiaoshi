@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { Share } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import IndexRoute from "../../app/index";
@@ -119,6 +120,73 @@ describe("mobile app shell flow", () => {
     expect(view.getByText("如果我没有回来确认")).toBeTruthy();
     expect(view.getByText("02:15:00")).toBeTruthy();
     expect(view.getByText("我还在")).toBeTruthy();
+  });
+
+  it("shows a shareable confirmation link when SMS delivery is unavailable", async () => {
+    const confirmationUrl = "https://brwxs.com/c/manual-token";
+    const shareSpy = jest.spyOn(Share, "share").mockResolvedValue({ action: Share.sharedAction });
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === "https://brwxs.com/api/contacts" && options?.method === "GET") {
+        return {
+          json: async () => ({ contacts: [] }),
+          ok: true,
+          status: 200,
+        };
+      }
+      if (url === "https://brwxs.com/api/contacts/invite") {
+        return {
+          json: async () => ({
+            confirmationUrl,
+            contact: {
+              displayName: "周宁",
+              email: "",
+              id: "contact-1",
+              phone: "13700137000",
+              status: "pending",
+            },
+          }),
+          ok: true,
+          status: 200,
+        };
+      }
+      return {
+        json: async () => ({}),
+        ok: true,
+        status: 200,
+      };
+    });
+
+    const view = await renderShell();
+    await login(view);
+    await openSettings(view);
+
+    await fireEvent.press(view.getByLabelText("添加联系人"));
+    await fireEvent.changeText(view.getByLabelText("联系人姓名"), "周宁");
+    await fireEvent.changeText(view.getByLabelText("联系人电话"), "13700137000");
+    await fireEvent.press(view.getByText("发送邀请"));
+
+    await waitFor(() => {
+      expect(view.getByText("等待周宁确认")).toBeTruthy();
+      expect(view.getByText(confirmationUrl)).toBeTruthy();
+    });
+
+    await fireEvent.press(view.getByText("分享确认链接"));
+
+    expect(shareSpy).toHaveBeenCalledWith({
+      message: `周宁，请打开这个链接确认成为我的紧急联系人：${confirmationUrl}`,
+      title: "确认紧急联系人",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://brwxs.com/api/contacts/invite",
+      expect.objectContaining({
+        body: JSON.stringify({
+          deliveryMode: "manual",
+          displayName: "周宁",
+          email: "",
+          phone: "13700137000",
+        }),
+      }),
+    );
   });
 
   it("saves settings from the sheet and confirms safety through the code modal", async () => {

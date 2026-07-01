@@ -170,6 +170,7 @@ describe("HomeScreen", () => {
         "https://app.test/api/contacts/invite",
         expect.objectContaining({
           body: JSON.stringify({
+            deliveryMode: "manual",
             displayName: "周宁",
             email: "zhouning@example.com",
             phone: "13700137000",

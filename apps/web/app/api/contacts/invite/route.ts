@@ -8,6 +8,7 @@ type InviteContactRequestBody = {
   phone?: unknown;
   email?: unknown;
   displayName?: unknown;
+  deliveryMode?: unknown;
 };
 
 export async function POST(request: Request): Promise<Response> {
@@ -37,6 +38,7 @@ export async function POST(request: Request): Promise<Response> {
         phone: body.phone,
         email: typeof body.email === "string" ? body.email : null,
         displayName: body.displayName,
+        deliveryMode: body.deliveryMode === "manual" ? "manual" : "auto",
         now: new Date(),
         tokenSecret: config.tokenSecret,
         confirmationBaseUrl: config.confirmationBaseUrl,
@@ -49,6 +51,7 @@ export async function POST(request: Request): Promise<Response> {
 
     return Response.json({
       contact: result.contact,
+      confirmationUrl: `${config.confirmationBaseUrl.replace(/\/+$/, "")}/${result.token}`,
     });
   } catch (error) {
     return handleInviteError(error);

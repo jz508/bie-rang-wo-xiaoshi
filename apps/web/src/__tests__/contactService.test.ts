@@ -228,6 +228,32 @@ describe("contact service", () => {
     ]);
   });
 
+  it("manual invite mode creates a pending contact without sending SMS", async () => {
+    const result = await inviteContact(
+      {
+        userId: "user-1",
+        phone: "13900139000",
+        displayName: "Auntie",
+        now,
+        tokenSecret,
+        confirmationBaseUrl: "https://example.test/c",
+        deliveryMode: "manual",
+      },
+      { repository },
+    );
+
+    expect(result.contact).toMatchObject({
+      userId: "user-1",
+      phone: "13900139000",
+      displayName: "Auntie",
+      status: "pending",
+    });
+    expect(result.token).toEqual(expect.any(String));
+    expect(repository.contacts.get(result.contact.id)?.status).toBe("pending");
+    expect(delivery.payloads).toEqual([]);
+    expect(delivery.emailPayloads).toEqual([]);
+  });
+
   it("stores a trimmed contact email for trigger email delivery", async () => {
     const result = await inviteContact(
       {

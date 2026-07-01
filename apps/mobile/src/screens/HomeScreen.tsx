@@ -5,6 +5,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -23,6 +24,7 @@ import { spacing, themes, typography, type ThemeName } from "../theme/tokens";
 type ContactOption = {
   email: string;
   enabled: boolean;
+  confirmationUrl?: string;
   id: string;
   name: string;
   phone: string;
@@ -310,10 +312,11 @@ export function HomeScreen({
     };
 
     try {
-      const result = await postJson<{ contact?: RemoteContact }>(
+      const result = await postJson<{ confirmationUrl?: unknown; contact?: RemoteContact }>(
         apiBaseUrl,
         "/api/contacts/invite",
         {
+          deliveryMode: "manual",
           displayName: contactToInvite.name,
           email: contactToInvite.email,
           phone: contactToInvite.phone,
@@ -324,7 +327,10 @@ export function HomeScreen({
         throw new Error("Invite response did not include a contact");
       }
 
-      const nextContact = mapRemoteContact(result.contact, contacts);
+      const nextContact = {
+        ...mapRemoteContact(result.contact, contacts),
+        confirmationUrl: typeof result.confirmationUrl === "string" ? result.confirmationUrl : undefined,
+      };
 
       setContacts((current) => upsertContact(current, nextContact));
       setWaitingContactId(nextContact.id);
@@ -345,6 +351,21 @@ export function HomeScreen({
       setContacts((current) => mergeRemoteContacts(current, result.contacts!));
     } catch {
       // Contact status refresh should never block the local guard flow.
+    }
+  }
+
+  async function shareWaitingContactInvite() {
+    if (!waitingContact?.confirmationUrl) {
+      return;
+    }
+
+    try {
+      await Share.share({
+        message: `${waitingContact.name}，请打开这个链接确认成为我的紧急联系人：${waitingContact.confirmationUrl}`,
+        title: "确认紧急联系人",
+      });
+    } catch {
+      // Sharing is a device-level action; keep the waiting sheet usable if it is cancelled or unavailable.
     }
   }
 
@@ -662,6 +683,7 @@ export function HomeScreen({
         templates={templates}
         visible={settingsOpen}
         waitingContact={waitingContact}
+        onShareWaitingContact={shareWaitingContactInvite}
         onCloseWaitingContact={() => setWaitingContactId(null)}
       />
 
@@ -973,6 +995,7 @@ function SettingsSheet({
   onRefreshContacts,
   onSave,
   onSelectTemplate,
+  onShareWaitingContact,
   onToggleContact,
   onUpdateContactDraft,
   palette,
@@ -1000,6 +1023,7 @@ function SettingsSheet({
   onRefreshContacts: () => void;
   onSave: () => void;
   onSelectTemplate: (templateKey: string) => void;
+  onShareWaitingContact: () => void;
   onToggleContact: (contactId: string) => void;
   onUpdateContactDraft: (field: "email" | "name" | "phone", value: string) => void;
   palette: Palette;
@@ -1180,6 +1204,7 @@ function SettingsSheet({
             contact={waitingContact}
             onClose={onCloseWaitingContact}
             onRefresh={onRefreshContacts}
+            onShareInvite={onShareWaitingContact}
             palette={palette}
           />
         </View>
@@ -1267,11 +1292,13 @@ function ContactWaitingSheet({
   contact,
   onClose,
   onRefresh,
+  onShareInvite,
   palette,
 }: {
   contact: ContactOption | null;
   onClose: () => void;
   onRefresh: () => void;
+  onShareInvite: () => void;
   palette: Palette;
 }) {
   if (!contact) {
@@ -1305,6 +1332,21 @@ function ContactWaitingSheet({
           </View>
           <Text style={[styles.waitingTitle, { color: unavailable ? palette.danger : palette.text }]}>{mainText}</Text>
           <Text style={[styles.waitingHint, { color: palette.mutedText }]}>{hintText}</Text>
+          {!confirmed && !unavailable && contact.confirmationUrl ? (
+            <View style={[styles.inviteLinkPanel, { backgroundColor: palette.safeWash, borderColor: palette.safeBorder }]}>
+              <Text style={[styles.inviteLinkTitle, { color: palette.text }]}>把确认链接发给联系人</Text>
+              <Text selectable style={[styles.inviteLinkText, { color: palette.safeButtonText }]}>
+                {contact.confirmationUrl}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={onShareInvite}
+                style={[styles.confirmSubmitButton, { backgroundColor: palette.primaryButton }]}
+              >
+                <Text style={[styles.primaryButtonText, { color: palette.primaryButtonText }]}>分享确认链接</Text>
+              </Pressable>
+            </View>
+          ) : null}
           <Pressable accessibilityRole="button" onPress={onRefresh} style={[styles.confirmSubmitButton, { backgroundColor: palette.primaryButton }]}>
             <Text style={[styles.primaryButtonText, { color: palette.primaryButtonText }]}>刷新状态</Text>
           </Pressable>
@@ -1392,6 +1434,7 @@ function mapRemoteContact(remoteContact: RemoteContact, currentContacts: Contact
   const status = normalizeContactStatus(remoteContact.status);
 
   return {
+    confirmationUrl: previous?.confirmationUrl,
     email: typeof remoteContact.email === "string" ? remoteContact.email : "",
     enabled: status === "confirmed" ? previous?.enabled ?? true : false,
     id,
@@ -1726,6 +1769,21 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.34)",
     flex: 1,
     justifyContent: "center",
+  },
+  inviteLinkPanel: {
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  inviteLinkText: {
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+  inviteLinkTitle: {
+    fontSize: 14,
+    fontWeight: "800",
   },
   emptyContactHint: {
     fontSize: 13,

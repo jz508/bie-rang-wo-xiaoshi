@@ -76,6 +76,7 @@ export type InviteContactInput = {
   phone: string;
   email?: string | null;
   displayName: string;
+  deliveryMode?: "auto" | "manual";
   now: Date;
   tokenSecret: string;
   confirmationBaseUrl: string;
@@ -136,6 +137,10 @@ export async function inviteContact(
     expiresAt: new Date(input.now.getTime() + CONTACT_CONFIRMATION_TOKEN_TTL_MS),
     secret: input.tokenSecret,
   });
+
+  if (input.deliveryMode === "manual") {
+    return { contact, token };
+  }
 
   try {
     const confirmationUrl = buildConfirmationUrl(input.confirmationBaseUrl, token);
