@@ -336,30 +336,44 @@ describe("countdown service", () => {
     });
   });
 
-  it("email channel preference falls back to SMS when a confirmed contact has no email", async () => {
+  it("email channel preference skips a confirmed contact without email", async () => {
     seedExpiredCountdown(repository);
     repository.contacts.push({
       ...confirmedContact("contact-1", "user-1"),
       email: null,
     });
 
-    await triggerExpiredCountdowns(new Date("2026-06-24T12:00:00.000Z"), {
+    const result = await triggerExpiredCountdowns(new Date("2026-06-24T12:00:00.000Z"), {
       repository,
       delivery,
       preferredDeliveryChannel: "email",
     });
 
-    expect(delivery.payloads[0]).toMatchObject({
-      channel: "sms",
-      contact: expect.objectContaining({
-        id: "contact-1",
-        phone: "13800138000",
-      }),
-    });
-    expect(repository.deliveryEvents[0]?.channel).toBe("sms");
+    expect(result).toEqual({ processedCountdowns: 1, attemptedDeliveries: 0 });
+    expect(delivery.payloads).toEqual([]);
+    expect(repository.deliveryEvents).toEqual([]);
   });
 
-  it("SMS channel preference falls back to email when phone is missing", async () => {
+  it("SMS channel preference skips a confirmed contact without phone", async () => {
+    seedExpiredCountdown(repository);
+    repository.contacts.push({
+      ...confirmedContact("contact-1", "user-1"),
+      phone: "",
+      email: "chenmo@example.com",
+    });
+
+    const result = await triggerExpiredCountdowns(new Date("2026-06-24T12:00:00.000Z"), {
+      repository,
+      delivery,
+      preferredDeliveryChannel: "sms",
+    });
+
+    expect(result).toEqual({ processedCountdowns: 1, attemptedDeliveries: 0 });
+    expect(delivery.payloads).toEqual([]);
+    expect(repository.deliveryEvents).toEqual([]);
+  });
+
+  it("auto channel still falls back to email when phone is missing", async () => {
     seedExpiredCountdown(repository);
     repository.contacts.push({
       ...confirmedContact("contact-1", "user-1"),
@@ -370,7 +384,7 @@ describe("countdown service", () => {
     await triggerExpiredCountdowns(new Date("2026-06-24T12:00:00.000Z"), {
       repository,
       delivery,
-      preferredDeliveryChannel: "sms",
+      preferredDeliveryChannel: "auto",
     });
 
     expect(delivery.payloads[0]).toMatchObject({

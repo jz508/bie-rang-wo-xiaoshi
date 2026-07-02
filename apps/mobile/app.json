@@ -2,7 +2,7 @@
   "expo": {
     "name": "别让我消失",
     "slug": "bie-rang-wo-xiaoshi",
-    "version": "0.1.5",
+    "version": "0.1.6",
     "scheme": "bie-rang-wo-xiaoshi",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",

@@ -100,6 +100,39 @@ describe("HomeScreen", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("does not unlock guard with a confirmed phone-only contact in no-SMS mode", async () => {
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === "https://app.test/api/contacts" && options?.method === "GET") {
+        return {
+          json: async () => ({
+            contacts: [
+              {
+                displayName: "周宁",
+                email: "",
+                id: "contact-1",
+                phone: "13700137000",
+                status: "confirmed",
+              },
+            ],
+          }),
+          ok: true,
+          status: 200,
+        };
+      }
+
+      return {
+        json: async () => ({}),
+        ok: true,
+        status: 200,
+      };
+    });
+
+    await renderWithSafeArea(<HomeScreen apiBaseUrl="https://app.test" userId="user-1" />);
+    await login();
+
+    expect(screen.getByText("添加并确认联系人后可开始")).toBeTruthy();
+  });
+
   it("starts with empty contacts and shows the waiting confirmation screen after adding one", async () => {
     let refreshShouldConfirm = false;
     fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
@@ -274,7 +307,28 @@ describe("HomeScreen", () => {
     await fireEvent.changeText(screen.getByLabelText("联系人邮箱"), "zhouning@example.com");
     await fireEvent.press(screen.getByText("发送邀请"));
 
-    expect(screen.getByText("请填写姓名和手机号")).toBeTruthy();
+    expect(screen.getByText("请填写姓名、手机号和邮箱")).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://app.test/api/contacts/invite",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+  });
+
+  it("requires an email before sending a contact invite in no-SMS mode", async () => {
+    await renderWithSafeArea(<HomeScreen apiBaseUrl="https://app.test" userId="user-1" />);
+    await login();
+    await openSettings();
+    await fireEvent.press(screen.getByLabelText("添加联系人"));
+    await waitFor(() => {
+      expect(screen.getByText("添加联系人")).toBeTruthy();
+    });
+    await fireEvent.changeText(screen.getByLabelText("联系人姓名"), "周宁");
+    await fireEvent.changeText(screen.getByLabelText("联系人电话"), "13700137000");
+    await fireEvent.press(screen.getByText("发送邀请"));
+
+    expect(screen.getByText("请填写姓名、手机号和邮箱")).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalledWith(
       "https://app.test/api/contacts/invite",
       expect.objectContaining({

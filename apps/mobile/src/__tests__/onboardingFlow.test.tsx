@@ -139,7 +139,7 @@ describe("mobile app shell flow", () => {
             confirmationUrl,
             contact: {
               displayName: "周宁",
-              email: "",
+              email: "zhouning@example.com",
               id: "contact-1",
               phone: "13700137000",
               status: "pending",
@@ -163,6 +163,7 @@ describe("mobile app shell flow", () => {
     await fireEvent.press(view.getByLabelText("添加联系人"));
     await fireEvent.changeText(view.getByLabelText("联系人姓名"), "周宁");
     await fireEvent.changeText(view.getByLabelText("联系人电话"), "13700137000");
+    await fireEvent.changeText(view.getByLabelText("联系人邮箱"), "zhouning@example.com");
     await fireEvent.press(view.getByText("发送邀请"));
 
     await waitFor(() => {
@@ -182,7 +183,7 @@ describe("mobile app shell flow", () => {
         body: JSON.stringify({
           deliveryMode: "manual",
           displayName: "周宁",
-          email: "",
+          email: "zhouning@example.com",
           phone: "13700137000",
         }),
       }),

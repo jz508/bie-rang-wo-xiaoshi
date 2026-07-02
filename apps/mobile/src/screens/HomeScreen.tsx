@@ -134,7 +134,7 @@ export function HomeScreen({
   const palette = nightMode ? palettes.night : palettes.light;
   const enabledContacts = contacts.filter((contact) => contact.status === "confirmed" && contact.enabled);
   const reachableContacts = enabledContacts.filter(
-    (contact) => contact.name.trim() && (contact.phone.trim() || contact.email.trim()),
+    (contact) => contact.name.trim() && contact.email.trim(),
   );
   const waitingContact = waitingContactId ? contacts.find((contact) => contact.id === waitingContactId) ?? null : null;
   const selectedTemplate = templates.find((template) => template.key === selectedTemplateKey) ?? templates[0];
@@ -144,7 +144,8 @@ export function HomeScreen({
   const canAddContact =
     contacts.length < 3 &&
     contactDraft.name.trim().length > 0 &&
-    contactDraft.phone.trim().length > 0;
+    contactDraft.phone.trim().length > 0 &&
+    contactDraft.email.trim().length > 0;
   const previewMessage = [selectedTemplate.text, note.trim()].filter(Boolean).join(" ");
   const contactDisplay =
     contacts.length === 0
@@ -298,7 +299,7 @@ export function HomeScreen({
 
   async function handleAddContact() {
     if (!canAddContact) {
-      setContactError("请填写姓名和手机号");
+      setContactError("请填写姓名、手机号和邮箱");
       return;
     }
 
@@ -1271,7 +1272,7 @@ function ContactEditor({
                 inputMode="email"
                 keyboardType="email-address"
                 onChangeText={(value) => onUpdateContactDraft("email", value)}
-                placeholder="选填"
+                placeholder="用于接收提醒"
                 placeholderTextColor={palette.placeholder}
                 style={[styles.textInput, { borderColor: palette.hairline, color: palette.text }]}
                 value={contactDraft.email}

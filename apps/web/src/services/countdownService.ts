@@ -299,11 +299,11 @@ function getDeliveryChannel(
   preferredChannel: DeliveryChannel | "auto",
 ): DeliveryChannel | null {
   if (preferredChannel === "email") {
-    return contact.email ? "email" : contact.phone ? "sms" : null;
+    return contact.email ? "email" : null;
   }
 
   if (preferredChannel === "sms") {
-    return contact.phone ? "sms" : contact.email ? "email" : null;
+    return contact.phone ? "sms" : null;
   }
 
   return contact.phone ? "sms" : contact.email ? "email" : null;
