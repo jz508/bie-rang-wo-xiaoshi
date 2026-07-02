@@ -11,6 +11,8 @@ model User {
   id                     String             @id @default(cuid())
   phone                  String             @unique
   phoneVerifiedAt        DateTime?
+  email                  String?            @unique
+  emailVerifiedAt        DateTime?
   nickname               String
   smsTriggerPausedAt     DateTime?
   smsTriggerPausedReason String?
@@ -104,4 +106,17 @@ model AbuseEvent {
   @@unique([userId, contactId, type])
   @@index([userId, type, createdAt])
   @@index([contactId, createdAt])
+}
+
+model EmailLoginCode {
+  id           String    @id @default(cuid())
+  email        String
+  codeHash     String
+  attemptCount Int       @default(0)
+  consumedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime
+
+  @@index([email, createdAt])
+  @@index([email, consumedAt, expiresAt])
 }

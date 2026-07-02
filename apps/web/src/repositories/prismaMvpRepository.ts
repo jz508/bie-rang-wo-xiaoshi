@@ -1,10 +1,12 @@
 import {
   type Countdown as PrismaCountdown,
+  type EmailLoginCode as PrismaEmailLoginCode,
   type EmergencyContact as PrismaEmergencyContact,
   Prisma,
   type PrismaClient,
   type User as PrismaUser,
 } from "@prisma/client";
+import { createHash } from "node:crypto";
 import type {
   CountdownStatus,
   EmergencyContactStatus,
@@ -34,6 +36,11 @@ import type {
   ContactConfirmationLookup,
   TriggerMessageLookup,
 } from "../services/pageDataService";
+import type {
+  EmailAuthCodeRecord,
+  EmailAuthRepository,
+  EmailAuthUserRecord,
+} from "../services/emailAuthService";
 import { getPrismaClient } from "../runtime/prisma";
 
 type ContactRollbackSnapshot = {
@@ -42,11 +49,96 @@ type ContactRollbackSnapshot = {
 };
 
 export class PrismaMvpRepository
-  implements ContactRepository, CountdownRepository, MessageReviewRepository, PageDataRepository
+  implements ContactRepository, CountdownRepository, MessageReviewRepository, PageDataRepository, EmailAuthRepository
 {
   private readonly rollbackSnapshots = new Map<string, ContactRollbackSnapshot>();
 
   constructor(private readonly prisma: PrismaClient = getPrismaClient()) {}
+
+  async findLatestEmailLoginCode(email: string): Promise<EmailAuthCodeRecord | null> {
+    const code = await this.prisma.emailLoginCode.findFirst({
+      where: { email },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return code ? toEmailAuthCodeRecord(code) : null;
+  }
+
+  async createEmailLoginCode(input: {
+    email: string;
+    codeHash: string;
+    createdAt: Date;
+    expiresAt: Date;
+  }): Promise<EmailAuthCodeRecord> {
+    const code = await this.prisma.emailLoginCode.create({
+      data: {
+        email: input.email,
+        codeHash: input.codeHash,
+        createdAt: input.createdAt,
+        expiresAt: input.expiresAt,
+      },
+    });
+
+    return toEmailAuthCodeRecord(code);
+  }
+
+  async incrementEmailLoginCodeAttempt(input: { codeId: string; attemptedAt: Date }): Promise<void> {
+    await this.prisma.emailLoginCode.update({
+      where: { id: input.codeId },
+      data: {
+        attemptCount: {
+          increment: 1,
+        },
+      },
+    });
+  }
+
+  async consumeEmailLoginCode(input: { codeId: string; consumedAt: Date }): Promise<void> {
+    await this.prisma.emailLoginCode.update({
+      where: { id: input.codeId },
+      data: {
+        consumedAt: input.consumedAt,
+      },
+    });
+  }
+
+  async upsertVerifiedEmailUser(input: {
+    email: string;
+    emailVerifiedAt: Date;
+    nickname: string;
+  }): Promise<EmailAuthUserRecord> {
+    const existing = await this.prisma.user.findUnique({
+      where: { email: input.email },
+    });
+
+    const user = existing
+      ? await this.prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            email: input.email,
+            emailVerifiedAt: input.emailVerifiedAt,
+          },
+        })
+      : await this.prisma.user.create({
+          data: {
+            email: input.email,
+            emailVerifiedAt: input.emailVerifiedAt,
+            nickname: input.nickname,
+            phone: buildEmailLoginPlaceholderPhone(input.email),
+            phoneVerifiedAt: input.emailVerifiedAt,
+            countdown: {
+              create: {
+                durationMinutes: 135,
+                lastConfirmedAt: input.emailVerifiedAt,
+                expiresAt: new Date(input.emailVerifiedAt.getTime() + 135 * 60_000),
+                status: "active",
+              },
+            },
+          },
+        });
+
+    return toEmailAuthUserRecord(user);
+  }
 
   async findSenderById(userId: string): Promise<ContactSenderRecord | null> {
     const user = await this.prisma.user.findUnique({
@@ -515,6 +607,42 @@ export function createPrismaMvpRepository(prisma: PrismaClient = getPrismaClient
 
 function rollbackKey(contactId: string, inviteCreatedAt: Date): string {
   return `${contactId}:${inviteCreatedAt.toISOString()}`;
+}
+
+function toEmailAuthCodeRecord(code: PrismaEmailLoginCode): EmailAuthCodeRecord {
+  return {
+    id: code.id,
+    email: code.email,
+    codeHash: code.codeHash,
+    attemptCount: code.attemptCount,
+    consumedAt: code.consumedAt,
+    createdAt: code.createdAt,
+    expiresAt: code.expiresAt,
+  };
+}
+
+function toEmailAuthUserRecord(user: {
+  id: string;
+  email: string | null;
+  emailVerifiedAt: Date | null;
+  nickname: string;
+}): EmailAuthUserRecord {
+  if (!user.email || !user.emailVerifiedAt) {
+    throw new Error("Email user is not verified");
+  }
+
+  return {
+    id: user.id,
+    email: user.email,
+    emailVerifiedAt: user.emailVerifiedAt,
+    nickname: user.nickname,
+  };
+}
+
+function buildEmailLoginPlaceholderPhone(email: string): string {
+  const digest = createHash("sha256").update(email).digest("hex").slice(0, 32);
+
+  return `email-login:${digest}`;
 }
 
 function toContactSenderRecord(user: Pick<PrismaUser, "id" | "nickname" | "phone" | "phoneVerifiedAt">): ContactSenderRecord {

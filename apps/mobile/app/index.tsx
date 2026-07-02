@@ -10,7 +10,6 @@ export default function IndexRoute() {
   const extra = Constants.expoConfig?.extra as
     | {
         apiBaseUrl?: string;
-        demoUserId?: string;
       }
     | undefined;
 
@@ -21,7 +20,6 @@ export default function IndexRoute() {
       onNightModePreferenceChange={setNightModePreference}
       onThemeNameChange={setThemeName}
       themeName={themeName}
-      userId={extra?.demoUserId ?? "demo-user"}
     />
   );
 }

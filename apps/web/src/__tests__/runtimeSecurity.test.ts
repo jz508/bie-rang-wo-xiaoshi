@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHmac } from "node:crypto";
 import { getAuthenticatedUser, requireAuthenticatedUser } from "../runtime/auth";
 import { authorizeCronRequest } from "../runtime/cronAuth";
 import { getRuntimeConfig } from "../runtime/config";
 import { GET, POST } from "../../app/api/cron/trigger-expired/route";
 
 describe("runtime auth boundary", () => {
+  afterEach(() => {
+    delete process.env.TOKEN_SECRET;
+    delete process.env.BIE_RANG_WO_XIAOSHI_TOKEN_SECRET;
+    vi.unstubAllEnvs();
+  });
+
   it("requires an authenticated user header for write routes", async () => {
     const response = requireAuthenticatedUser(new Request("https://app.test/api/messages/review"));
 
@@ -27,6 +34,38 @@ describe("runtime auth boundary", () => {
     );
 
     expect(user).toEqual({ userId: "user-session" });
+  });
+
+  it("derives user identity from a bearer session token", () => {
+    process.env.TOKEN_SECRET = "runtime-secret";
+    const token = createTestSessionToken({
+      secret: "runtime-secret",
+      userId: "user-token",
+    });
+
+    const user = getAuthenticatedUser(
+      new Request("https://app.test/api/countdown/confirm", {
+        headers: {
+          authorization: `Bearer ${token}`,
+        },
+      }),
+    );
+
+    expect(user).toEqual({ userId: "user-token" });
+  });
+
+  it("ignores the demo user header in production", () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    const user = getAuthenticatedUser(
+      new Request("https://app.test/api/countdown/confirm", {
+        headers: {
+          "x-demo-user-id": "demo-user",
+        },
+      }),
+    );
+
+    expect(user).toBeNull();
   });
 });
 
@@ -138,3 +177,17 @@ describe("runtime trigger delivery configuration", () => {
     );
   });
 });
+
+function createTestSessionToken(input: { secret: string; userId: string }): string {
+  const encodedPayload = Buffer.from(
+    JSON.stringify({
+      purpose: "email-session",
+      userId: input.userId,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    }),
+    "utf8",
+  ).toString("base64url");
+  const signature = createHmac("sha256", input.secret).update(encodedPayload).digest("base64url");
+
+  return `${encodedPayload}.${signature}`;
+}

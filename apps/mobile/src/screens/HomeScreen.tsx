@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   Animated,
   Easing,
@@ -51,7 +52,6 @@ type HomeScreenProps = {
   initialRemainingSeconds?: number;
   nightModePreference?: NightModePreference;
   themeName?: ThemeName;
-  userId?: string;
   onNightModePreferenceChange?: (preference: NightModePreference) => void;
   onThemeNameChange?: (themeName: ThemeName) => void;
 };
@@ -59,7 +59,7 @@ type HomeScreenProps = {
 const confirmCode = "1234";
 const defaultApiBaseUrl = "https://brwxs.com";
 const safetyReturnSeconds = 5;
-const transitionLoginCode = "1234";
+const sessionTokenStorageKey = "bie-rang-wo-xiaoshi:session-token";
 const wheelItemHeight = 42;
 
 const nightModeOptions: Array<{ label: string; value: NightModePreference }> = [
@@ -93,13 +93,17 @@ export function HomeScreen({
   onNightModePreferenceChange,
   onThemeNameChange,
   themeName = "light",
-  userId = "demo-user",
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const [loggedIn, setLoggedIn] = useState(false);
-  const [phoneInput, setPhoneInput] = useState("");
+  const [emailInput, setEmailInput] = useState("");
   const [loginCodeInput, setLoginCodeInput] = useState("");
   const [loginCodeError, setLoginCodeError] = useState("");
+  const [loginCodeStatus, setLoginCodeStatus] = useState("");
+  const [requestingLoginCode, setRequestingLoginCode] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [otherLoginMethodsOpen, setOtherLoginMethodsOpen] = useState(false);
   const [hours, setHours] = useState(2);
   const [minutes, setMinutes] = useState(15);
   const [planStarted, setPlanStarted] = useState(false);
@@ -125,7 +129,6 @@ export function HomeScreen({
   const [automaticNightModeActive, setAutomaticNightModeActive] = useState(() => isAutomaticNightModeActive());
   const homeEntrance = useRef(new Animated.Value(0)).current;
   const nightModePreference = controlledNightModePreference ?? localNightModePreference;
-  const activeUserId = userId === "demo-user" ? phoneInput.trim() || userId : userId;
 
   const nightMode =
     nightModePreference === "on" ||
@@ -139,7 +142,10 @@ export function HomeScreen({
   const waitingContact = waitingContactId ? contacts.find((contact) => contact.id === waitingContactId) ?? null : null;
   const selectedTemplate = templates.find((template) => template.key === selectedTemplateKey) ?? templates[0];
   const durationMinutes = hours * 60 + minutes;
-  const canLogin = phoneInput.trim().length >= 5 && loginCodeInput.trim().length > 0;
+  const normalizedEmailInput = emailInput.trim();
+  const canRequestLoginCode = isEmailLike(normalizedEmailInput) && !requestingLoginCode;
+  const canLogin =
+    isEmailLike(normalizedEmailInput) && loginCodeInput.trim().length > 0 && !loggingIn;
   const canStart = durationMinutes > 0 && reachableContacts.length > 0;
   const canAddContact =
     contacts.length < 3 &&
@@ -171,12 +177,39 @@ export function HomeScreen({
   }, [planStarted, remainingSeconds, safetyConfirmed]);
 
   useEffect(() => {
-    if (!loggedIn) {
+    let cancelled = false;
+
+    async function restoreSession() {
+      const storedToken = await AsyncStorage.getItem(sessionTokenStorageKey);
+      if (!storedToken || cancelled) {
+        return;
+      }
+
+      try {
+        await getJson(apiBaseUrl, "/api/auth/me", storedToken);
+        if (!cancelled) {
+          setSessionToken(storedToken);
+          setLoggedIn(true);
+        }
+      } catch {
+        await AsyncStorage.removeItem(sessionTokenStorageKey);
+      }
+    }
+
+    void restoreSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl]);
+
+  useEffect(() => {
+    if (!loggedIn || !sessionToken) {
       return;
     }
 
     void refreshContacts();
-  }, [activeUserId, loggedIn]);
+  }, [loggedIn, sessionToken]);
 
   useEffect(() => {
     if (nightModePreference !== "auto") {
@@ -232,18 +265,57 @@ export function HomeScreen({
     }).start();
   }, [homeEntrance, loggedIn]);
 
-  function handleLogin() {
+  async function handleRequestLoginCode() {
+    if (!canRequestLoginCode) {
+      return;
+    }
+
+    setRequestingLoginCode(true);
+    setLoginCodeError("");
+    setLoginCodeStatus("");
+
+    try {
+      await postJson(apiBaseUrl, "/api/auth/email/request-code", {
+        email: normalizedEmailInput,
+      });
+      setLoginCodeStatus("验证码已发送");
+    } catch {
+      setLoginCodeError("验证码发送失败，请稍后再试");
+    } finally {
+      setRequestingLoginCode(false);
+    }
+  }
+
+  async function handleLogin() {
     if (!canLogin) {
       return;
     }
 
-    if (loginCodeInput.trim() !== transitionLoginCode) {
-      setLoginCodeError("测试码不正确");
-      return;
-    }
-
+    setLoggingIn(true);
     setLoginCodeError("");
-    setLoggedIn(true);
+    try {
+      const result = await postJson<{ sessionToken?: unknown }>(
+        apiBaseUrl,
+        "/api/auth/email/verify-code",
+        {
+          code: loginCodeInput.trim(),
+          email: normalizedEmailInput,
+        },
+      );
+      if (typeof result.sessionToken !== "string" || !result.sessionToken) {
+        throw new Error("Login response did not include a session token");
+      }
+
+      await AsyncStorage.setItem(sessionTokenStorageKey, result.sessionToken);
+      setSessionToken(result.sessionToken);
+      setLoginCodeInput("");
+      setLoginCodeStatus("");
+      setLoggedIn(true);
+    } catch {
+      setLoginCodeError("验证码不正确或已过期");
+    } finally {
+      setLoggingIn(false);
+    }
   }
 
   async function handleStartPlan() {
@@ -260,7 +332,7 @@ export function HomeScreen({
     setPlanStarted(true);
 
     try {
-      await postJson(apiBaseUrl, "/api/countdown/confirm", { durationMinutes }, activeUserId);
+      await postJson(apiBaseUrl, "/api/countdown/confirm", { durationMinutes }, sessionToken);
     } catch {
       // The local guard view remains responsive even when the demo backend is unavailable.
     }
@@ -322,7 +394,7 @@ export function HomeScreen({
           email: contactToInvite.email,
           phone: contactToInvite.phone,
         },
-        activeUserId,
+        sessionToken,
       );
       if (!isValidRemoteContact(result?.contact)) {
         throw new Error("Invite response did not include a contact");
@@ -344,7 +416,7 @@ export function HomeScreen({
 
   async function refreshContacts() {
     try {
-      const result = await getJson<{ contacts?: RemoteContact[] }>(apiBaseUrl, "/api/contacts", activeUserId);
+      const result = await getJson<{ contacts?: RemoteContact[] }>(apiBaseUrl, "/api/contacts", sessionToken);
       if (!Array.isArray(result.contacts)) {
         return;
       }
@@ -400,7 +472,7 @@ export function HomeScreen({
       await postJson(apiBaseUrl, "/api/messages/review", {
         templateKey: selectedTemplate.key,
         shortNote: note.trim(),
-      }, activeUserId);
+      }, sessionToken);
     } catch {
       // The prototype keeps local settings responsive even when the demo backend is unavailable.
     }
@@ -428,7 +500,7 @@ export function HomeScreen({
     setSafetyConfirmed(true);
 
     try {
-      await postJson(apiBaseUrl, "/api/countdown/pause", {}, activeUserId);
+      await postJson(apiBaseUrl, "/api/countdown/pause", {}, sessionToken);
     } catch {
       // The local safety confirmation is intentionally not blocked by network state.
     }
@@ -443,34 +515,61 @@ export function HomeScreen({
           </View>
 
           <View style={styles.loginFields}>
-            <FieldLabel label="手机号" palette={palette}>
+            <FieldLabel label="邮箱" palette={palette}>
               <TextInput
-                accessibilityLabel="手机号"
-                inputMode="tel"
-                keyboardType="phone-pad"
-                onChangeText={setPhoneInput}
-                placeholder="输入手机号"
-                placeholderTextColor={palette.placeholder}
-                style={[styles.textInput, { borderColor: palette.hairline, color: palette.text }]}
-                value={phoneInput}
-              />
-            </FieldLabel>
-            <FieldLabel label="测试码" palette={palette}>
-              <TextInput
-                accessibilityLabel="测试码"
-                inputMode="numeric"
-                keyboardType="number-pad"
+                accessibilityLabel="邮箱"
+                autoCapitalize="none"
+                autoCorrect={false}
+                inputMode="email"
+                keyboardType="email-address"
                 onChangeText={(value) => {
-                  setLoginCodeInput(value);
+                  setEmailInput(value);
                   setLoginCodeError("");
+                  setLoginCodeStatus("");
                 }}
-                placeholder="输入测试码"
+                placeholder="输入邮箱"
                 placeholderTextColor={palette.placeholder}
                 style={[styles.textInput, { borderColor: palette.hairline, color: palette.text }]}
-                value={loginCodeInput}
+                value={emailInput}
               />
             </FieldLabel>
-            <Text style={[styles.confirmError, { color: palette.danger }]}>{loginCodeError}</Text>
+            <FieldLabel label="验证码" palette={palette}>
+              <View style={styles.loginCodeRow}>
+                <TextInput
+                  accessibilityLabel="验证码"
+                  inputMode="numeric"
+                  keyboardType="number-pad"
+                  onChangeText={(value) => {
+                    setLoginCodeInput(value);
+                    setLoginCodeError("");
+                  }}
+                  placeholder="输入验证码"
+                  placeholderTextColor={palette.placeholder}
+                  style={[styles.textInput, styles.loginCodeInput, { borderColor: palette.hairline, color: palette.text }]}
+                  value={loginCodeInput}
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={!canRequestLoginCode}
+                  onPress={handleRequestLoginCode}
+                  style={({ pressed }) => [
+                    styles.codeButton,
+                    {
+                      backgroundColor: palette.segmentActive,
+                      borderColor: palette.hairline,
+                      opacity: !canRequestLoginCode ? 0.48 : pressed ? 0.72 : 1,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.codeButtonText, { color: palette.text }]}>
+                    {requestingLoginCode ? "发送中" : "获取验证码"}
+                  </Text>
+                </Pressable>
+              </View>
+            </FieldLabel>
+            <Text style={[styles.loginStatus, { color: loginCodeError ? palette.danger : palette.safeButtonText }]}>
+              {loginCodeError || loginCodeStatus}
+            </Text>
           </View>
 
           <Pressable
@@ -485,8 +584,18 @@ export function HomeScreen({
               },
             ]}
           >
-            <Text style={[styles.primaryButtonText, { color: palette.primaryButtonText }]}>登录</Text>
+            <Text style={[styles.primaryButtonText, { color: palette.primaryButtonText }]}>
+              {loggingIn ? "登录中" : "登录"}
+            </Text>
           </Pressable>
+          <Pressable accessibilityRole="button" onPress={() => setOtherLoginMethodsOpen(true)} style={styles.otherLoginButton}>
+            <Text style={[styles.otherLoginText, { color: palette.mutedText }]}>其它方式登录</Text>
+          </Pressable>
+          <OtherLoginMethodsModal
+            onClose={() => setOtherLoginMethodsOpen(false)}
+            palette={palette}
+            visible={otherLoginMethodsOpen}
+          />
         </View>
       </SafeAreaView>
     );
@@ -1360,6 +1469,39 @@ function ContactWaitingSheet({
   );
 }
 
+function OtherLoginMethodsModal({
+  onClose,
+  palette,
+  visible,
+}: {
+  onClose: () => void;
+  palette: Palette;
+  visible: boolean;
+}) {
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
+      <View style={styles.confirmRoot}>
+        <Pressable accessibilityLabel="关闭其它登录方式遮罩" onPress={onClose} style={styles.confirmBackdrop} />
+        <View style={[styles.otherLoginPanel, { backgroundColor: palette.surface }]}>
+          <View style={styles.confirmHeader}>
+            <Text style={[styles.sheetTitle, { color: palette.text }]}>选择登录方式</Text>
+            <Pressable accessibilityLabel="关闭其它登录方式" accessibilityRole="button" hitSlop={12} onPress={onClose} style={styles.closeButton}>
+              <CloseIcon color={palette.text} />
+            </Pressable>
+          </View>
+          <View style={[styles.otherLoginRow, { borderColor: palette.hairline }]}>
+            <View style={styles.settingCopy}>
+              <Text style={[styles.settingTitle, { color: palette.text }]}>手机验证码登录</Text>
+              <Text style={[styles.settingHint, { color: palette.mutedText }]}>企业短信资质完成后开启</Text>
+            </View>
+            <Text style={[styles.otherLoginBadge, { color: palette.safeButtonText }]}>即将支持</Text>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function ConfirmCodeDialog({
   code,
   error,
@@ -1518,15 +1660,17 @@ function getContactStatusColor(status: ContactStatus, palette: Palette) {
   return palette.mutedText;
 }
 
+function isEmailLike(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 async function getJson<T>(
   apiBaseUrl: string,
   path: string,
-  userId: string,
+  authToken?: string | null,
 ): Promise<T> {
   const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}${path}`, {
-    headers: {
-      "x-demo-user-id": userId,
-    },
+    headers: authToken ? { authorization: `Bearer ${authToken}` } : undefined,
     method: "GET",
   });
 
@@ -1541,14 +1685,18 @@ async function postJson<T = unknown>(
   apiBaseUrl: string,
   path: string,
   body: Record<string, unknown>,
-  userId: string,
+  authToken?: string | null,
 ): Promise<T> {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+  if (authToken) {
+    headers.authorization = `Bearer ${authToken}`;
+  }
+
   const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}${path}`, {
     body: JSON.stringify(body),
-    headers: {
-      "content-type": "application/json",
-      "x-demo-user-id": userId,
-    },
+    headers,
     method: "POST",
   });
 
@@ -1851,6 +1999,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: spacing.xxl,
   },
+  loginCodeInput: {
+    flex: 1,
+  },
+  loginCodeRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
   loginFields: {
     gap: spacing.md,
     marginBottom: spacing.md,
@@ -1867,6 +2023,11 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "800",
     letterSpacing: 0,
+  },
+  loginStatus: {
+    fontSize: 13,
+    fontWeight: "700",
+    minHeight: 20,
   },
   messagePreview: {
     borderRadius: 12,
@@ -1890,6 +2051,49 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
     textAlignVertical: "top",
+  },
+  codeButton: {
+    alignItems: "center",
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: "center",
+    minHeight: 56,
+    paddingHorizontal: spacing.md,
+    width: 112,
+  },
+  codeButtonText: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  otherLoginBadge: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  otherLoginButton: {
+    alignItems: "center",
+    minHeight: 48,
+    justifyContent: "center",
+    marginTop: spacing.sm,
+  },
+  otherLoginPanel: {
+    borderRadius: 18,
+    gap: spacing.lg,
+    padding: spacing.lg,
+    width: "88%",
+  },
+  otherLoginRow: {
+    alignItems: "center",
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+    minHeight: 72,
+    padding: spacing.md,
+  },
+  otherLoginText: {
+    fontSize: 15,
+    fontWeight: "800",
   },
   pickerSelection: {
     borderBottomWidth: StyleSheet.hairlineWidth,

@@ -7,6 +7,7 @@ import IndexRoute from "../../app/index";
 import { ThemeProvider } from "../theme/ThemeProvider";
 
 type RenderResult = Awaited<ReturnType<typeof render>>;
+const TEST_SESSION_TOKEN = "test-session-token";
 const safeAreaMetrics = {
   frame: { height: 844, width: 390, x: 0, y: 0 },
   insets: { bottom: 34, left: 0, right: 0, top: 24 },
@@ -23,11 +24,12 @@ function renderShell() {
 }
 
 async function login(view: RenderResult) {
-  await fireEvent.changeText(view.getByLabelText("手机号"), "13900139000");
+  await fireEvent.changeText(view.getByLabelText("邮箱"), "user@example.com");
   await waitFor(() => {
-    expect(view.getByLabelText("手机号")).toHaveProp("value", "13900139000");
+    expect(view.getByLabelText("邮箱")).toHaveProp("value", "user@example.com");
   });
-  await fireEvent.changeText(view.getByLabelText("测试码"), "1234");
+  await fireEvent.press(view.getByText("获取验证码"));
+  await fireEvent.changeText(view.getByLabelText("验证码"), "123456");
   await fireEvent.press(view.getByText("登录"));
   await waitFor(() => {
     expect(view.getByText("失联时间")).toBeTruthy();
@@ -59,12 +61,51 @@ async function addConfirmedContact(view: RenderResult) {
   });
 }
 
+type MockFetchHandler = (url: string, options?: RequestInit) => Promise<ResponseLike | undefined>;
+type ResponseLike = {
+  json: () => Promise<unknown>;
+  ok: boolean;
+  status: number;
+};
+
+function createMockFetch(handler?: MockFetchHandler) {
+  return async (url: string, options?: RequestInit): Promise<ResponseLike> => {
+    if (url.endsWith("/api/auth/email/request-code")) {
+      return okJson({ email: "user@example.com", expiresAt: "2026-07-02T10:10:00.000Z" });
+    }
+    if (url.endsWith("/api/auth/email/verify-code")) {
+      return okJson({
+        sessionToken: TEST_SESSION_TOKEN,
+        user: { email: "user@example.com", id: "user-1" },
+      });
+    }
+    if (url.endsWith("/api/auth/me")) {
+      return okJson({ user: { id: "user-1" } });
+    }
+
+    const handled = await handler?.(url, options);
+    if (handled) {
+      return handled;
+    }
+
+    return okJson({});
+  };
+}
+
+function okJson(body: unknown): ResponseLike {
+  return {
+    json: async () => body,
+    ok: true,
+    status: 200,
+  };
+}
+
 describe("mobile app shell flow", () => {
   const fetchMock = jest.fn();
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+    fetchMock.mockImplementation(createMockFetch(async (url: string, options?: RequestInit) => {
       if (url === "https://brwxs.com/api/contacts" && options?.method === "GET") {
         return {
           json: async () => ({ contacts: [] }),
@@ -92,7 +133,7 @@ describe("mobile app shell flow", () => {
         ok: true,
         status: 200,
       };
-    });
+    }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     await AsyncStorage.clear();
   });
@@ -125,7 +166,7 @@ describe("mobile app shell flow", () => {
   it("shows a shareable confirmation link when SMS delivery is unavailable", async () => {
     const confirmationUrl = "https://brwxs.com/c/manual-token";
     const shareSpy = jest.spyOn(Share, "share").mockResolvedValue({ action: Share.sharedAction });
-    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+    fetchMock.mockImplementation(createMockFetch(async (url: string, options?: RequestInit) => {
       if (url === "https://brwxs.com/api/contacts" && options?.method === "GET") {
         return {
           json: async () => ({ contacts: [] }),
@@ -154,7 +195,7 @@ describe("mobile app shell flow", () => {
         ok: true,
         status: 200,
       };
-    });
+    }));
 
     const view = await renderShell();
     await login(view);
